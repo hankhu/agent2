@@ -23,7 +23,7 @@ async def demo_sequential():
     print("Sequential Crew Demo")
     print("=" * 60)
 
-    llm = create_llm("openai", model="gpt-4o-mini")
+    llm = create_llm("openai", model="deepseek-v4-flash")
 
     researcher = ReActAgent(
         "researcher",
@@ -40,8 +40,13 @@ async def demo_sequential():
         llm=llm,
         system_prompt="You are an editor. Polish the writing for clarity and accuracy.",
     )
+    translator = ReActAgent(
+        "translator",
+        llm=llm,
+        system_prompt="You are an translator. Translate the writing into Chinese.",
+    )
 
-    crew = SequentialCrew("content_pipeline", agents=[researcher, writer, editor])
+    crew = SequentialCrew("content_pipeline", agents=[researcher, writer, editor, translator])
     result = await crew.run("Write a brief explanation of how neural networks work")
     print(f"\nFinal output:\n{result}")
 

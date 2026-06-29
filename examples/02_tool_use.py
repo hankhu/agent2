@@ -65,7 +65,7 @@ def convert_temperature(value: float, from_unit: str) -> str:
 
 
 async def main():
-    llm = create_llm("openai", model="gpt-4o-mini")
+    llm = create_llm("openai", model="deepseek-v4-flash")
 
     # Create agent with multiple custom tools
     agent = ReActAgent(

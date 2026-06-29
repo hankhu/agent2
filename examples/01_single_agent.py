@@ -10,6 +10,7 @@ Usage:
     uv run examples/01_single_agent.py
 """
 
+import os
 import asyncio
 
 from agent2.llm import create_llm
@@ -20,7 +21,8 @@ from agent2.tools.builtin import python_exec
 async def main():
     # 1. Create an LLM — switch provider by changing the first argument
     #llm = create_llm("openai", model="gpt-4o-mini")
-    llm = create_llm("ollama", model="gemma4:e2b")
+    #llm = create_llm("ollama", model="gemma4:e2b")
+    llm = create_llm("openai", base_url="https://api.deepseek.com/v1", model="deepseek-v4-flash")
 
     # 2. Create a ReAct agent with a code execution tool
     agent = ReActAgent(
