@@ -18,7 +18,7 @@ from agent2.tools.builtin import web_search, python_exec
 
 
 async def main():
-    llm = create_llm("openai", model="deepseek-v4-flash")
+    llm = create_llm("deepseek")
 
     agent = PlannerAgent(
         "Researcher",

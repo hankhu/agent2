@@ -23,7 +23,7 @@ async def demo_sequential():
     print("Sequential Crew Demo")
     print("=" * 60)
 
-    llm = create_llm("openai", model="deepseek-v4-flash")
+    llm = create_llm("deepseek")
 
     researcher = ReActAgent(
         "researcher",

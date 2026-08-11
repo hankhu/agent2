@@ -3,7 +3,7 @@ name = "agent2"
 version = "0.1.0"
 description = "A modular agent system framework for learning and research"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
@@ -36,5 +36,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 strict = true
