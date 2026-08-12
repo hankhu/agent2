@@ -1,26 +1,16 @@
-"""Example 03: Planning — Plan-and-Execute pattern.
+"""Test script: Fetch Tokyo's population and area using get_city_population and get_city_area.
 
-Demonstrates:
-- PlannerAgent that separates planning from execution
-- Dynamic re-planning based on intermediate results
-- Multi-step task decomposition
-
-Usage:
-    export AGENT2_OPENAI_API_KEY=sk-...
-    uv run examples/03_planning.py
+Both tools query the Wikidata SPARQL endpoint (P1082=population, P2046=area in km²).
 """
 
 import asyncio
-
-from agent2.llm import create_llm
-from agent2.agent import PlannerAgent
-from agent2.tools.builtin import web_search, python_exec
-
-from agent2.tools import tool
 import httpx
 
+from agent2.tools import tool
+
 WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
-WIKIDATA_HEADERS = {"User-Agent": "agent2-example/1.0", "Accept": "application/sparql-results+json"}
+HEADERS = {"User-Agent": "agent2-test/1.0 (https://github.com/agent2)", "Accept": "application/sparql-results+json"}
+
 
 @tool
 async def get_city_population(city: str) -> str:
@@ -36,7 +26,7 @@ async def get_city_population(city: str) -> str:
             response = await client.get(
                 WIKIDATA_SPARQL_URL,
                 params={"query": sparql, "format": "json"},
-                headers=WIKIDATA_HEADERS,
+                headers=HEADERS,
             )
             response.raise_for_status()
             data = response.json()
@@ -63,7 +53,7 @@ async def get_city_area(city: str) -> str:
             response = await client.get(
                 WIKIDATA_SPARQL_URL,
                 params={"query": sparql, "format": "json"},
-                headers=WIKIDATA_HEADERS,
+                headers=HEADERS,
             )
             response.raise_for_status()
             data = response.json()
@@ -75,25 +65,20 @@ async def get_city_area(city: str) -> str:
         except Exception as e:
             return f"Error fetching area for {city}: {str(e)}"
 
+
 async def main():
-    llm = create_llm("deepseek")
+    city = "Tokyo"
+    print(f"=== Fetching data for {city} ===\n")
 
-    agent = PlannerAgent(
-        "Researcher",
-        llm=llm,
-        tools=[get_city_population, get_city_area],
-        enable_replan=True,
-        max_step_iterations=3,
-    )
+    print("▶ Calling get_city_population...")
+    pop_result = await get_city_population(city=city)
+    print(f"  Population: {pop_result}\n")
 
-    result = await agent.run(
-        "Compare the population of Tokyo, New York, and London. "
-        "Which city is the most densely populated? "
-        "Show the calculations."
-    )
+    print("▶ Calling get_city_area...")
+    area_result = await get_city_area(city=city)
+    print(f"  Area:       {area_result}\n")
 
-    print("\n" + "=" * 60)
-    print("RESULT:", result)
+    print("=== Done ===")
 
 
 if __name__ == "__main__":
