@@ -25,26 +25,38 @@ NOMINATIM_HEADERS = {"User-Agent": "agent2-example/1.0"}
 WIKIDATA_HEADERS  = {"User-Agent": "agent2-example/1.0"}
 
 
+_QID_CACHE: dict[str, str | None] = {}
+_CLAIMS_CACHE: dict[str, dict] = {}
+
+
 async def _get_wikidata_qid(client: httpx.AsyncClient, city: str) -> str | None:
-    """Look up a city on Nominatim and return its Wikidata QID from extratags."""
+    """Look up a city on Nominatim and return its Wikidata QID from extratags (cached)."""
+    if city in _QID_CACHE:
+        return _QID_CACHE[city]
+
     r = await client.get(NOMINATIM_URL, params={
         "q": city, "format": "json", "limit": 1,
         "addressdetails": 0, "extratags": 1,
     }, headers=NOMINATIM_HEADERS)
     results = r.json()
-    if results:
-        return results[0].get("extratags", {}).get("wikidata")
-    return None
+    qid = results[0].get("extratags", {}).get("wikidata") if results else None
+    _QID_CACHE[city] = qid
+    return qid
 
 
 async def _wikidata_claims(client: httpx.AsyncClient, qid: str) -> dict:
-    """Fetch property claims for a Wikidata entity via wbgetentities."""
+    """Fetch property claims for a Wikidata entity via wbgetentities (cached)."""
+    if qid in _CLAIMS_CACHE:
+        return _CLAIMS_CACHE[qid]
+
     r = await client.get(WIKIDATA_API, params={
         "action": "wbgetentities", "ids": qid, "format": "json",
         "props": "claims", "languages": "en",
     }, headers=WIKIDATA_HEADERS)
     data = r.json()
-    return data.get("entities", {}).get(qid, {}).get("claims", {})
+    claims = data.get("entities", {}).get(qid, {}).get("claims", {})
+    _CLAIMS_CACHE[qid] = claims
+    return claims
 
 
 @tool
@@ -97,6 +109,13 @@ async def main():
         "Researcher",
         llm=llm,
         tools=[get_city_population, get_city_area],
+        system_prompt=(
+            "You are a helpful planning assistant. "
+            "IMPORTANT: Before calling any tool, check the previous step results carefully. "
+            "If the data for a city (population or area) was already retrieved in a previous step, "
+            "reuse that value directly — do NOT call the tool again for the same city. "
+            "Each city's population and area should be fetched at most once."
+        ),
         enable_replan=True,
         max_step_iterations=3,
     )

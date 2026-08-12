@@ -24,7 +24,8 @@ _PLANNER_PROMPT = """You are a planning agent. Given a task, create a detailed s
 Respond ONLY with a JSON array of strings, where each string is one step.
 Example: ["Step 1: Search for ...", "Step 2: Analyse ...", "Step 3: Summarise ..."]
 
-Keep the plan concise (3-7 steps). Each step should be actionable and specific.
+Keep the plan concise (3-5 steps). Each step should be actionable and specific.
+Avoid creating separate steps that re-query the same data.
 """
 
 _EXECUTOR_PROMPT = """You are a helpful AI assistant executing one step of a larger plan.
@@ -39,6 +40,11 @@ You are currently executing step {step_number}: {step_description}
 
 Previous step results:
 {previous_results}
+
+IMPORTANT — Avoid redundant tool calls:
+- Read the previous step results above carefully before calling any tool.
+- If the data you need (e.g. population or area for a city) is already present in a previous result, use that value directly.
+- Do NOT call a tool again for data that has already been fetched.
 
 Execute this step using the available tools. Provide your result clearly.
 When done, respond with your findings (no tool calls).
@@ -160,7 +166,7 @@ class PlannerAgent(BaseAgent):
     ) -> str:
         """Execute a single plan step using a mini ReAct loop."""
         prev_text = "\n".join(
-            f"Step {i+1} ({r['step']}): {r['result'][:200]}"
+            f"Step {i+1} ({r['step']}): {r['result'][:2000]}"
             for i, r in enumerate(previous_results)
         ) or "None yet."
 
@@ -171,6 +177,9 @@ class PlannerAgent(BaseAgent):
             step_description=step_description,
             previous_results=prev_text,
         )
+        # Append any custom system_prompt set on the agent
+        if self.system_prompt and self.system_prompt != "You are a helpful planning assistant.":
+            system = system + "\n\n" + self.system_prompt
 
         messages = [
             Message.system(system),
