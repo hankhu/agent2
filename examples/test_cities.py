@@ -1,28 +1,23 @@
-"""Example 03: Planning — Plan-and-Execute pattern.
+"""Test script: Fetch population and area for Tokyo, London, and New York using
+get_city_population and get_city_area.
 
-Demonstrates:
-- PlannerAgent that separates planning from execution
-- Dynamic re-planning based on intermediate results
-- Multi-step task decomposition
+Data flow:
+  1. Nominatim (OpenStreetMap) search → Wikidata QID (from extratags.wikidata)
+  2. Wikidata wbgetentities → P1082 (population) / P2046 (area km²)
 
-Usage:
-    export AGENT2_OPENAI_API_KEY=sk-...
-    uv run examples/03_planning.py
+No API key required. Run with:
+    uv run examples/test_cities.py
 """
 
 import asyncio
-
-from agent2.llm import create_llm
-from agent2.agent import PlannerAgent
-from agent2.tools.builtin import web_search, python_exec
-
-from agent2.tools import tool
 import httpx
 
-NOMINATIM_URL    = "https://nominatim.openstreetmap.org/search"
-WIKIDATA_API     = "https://www.wikidata.org/w/api.php"
-NOMINATIM_HEADERS = {"User-Agent": "agent2-example/1.0"}
-WIKIDATA_HEADERS  = {"User-Agent": "agent2-example/1.0"}
+from agent2.tools import tool
+
+NOMINATIM_URL  = "https://nominatim.openstreetmap.org/search"
+WIKIDATA_API   = "https://www.wikidata.org/w/api.php"
+NOMINATIM_HEADERS = {"User-Agent": "agent2-test/1.0"}
+WIKIDATA_HEADERS  = {"User-Agent": "agent2-test/1.0"}
 
 
 async def _get_wikidata_qid(client: httpx.AsyncClient, city: str) -> str | None:
@@ -38,7 +33,7 @@ async def _get_wikidata_qid(client: httpx.AsyncClient, city: str) -> str | None:
 
 
 async def _wikidata_claims(client: httpx.AsyncClient, qid: str) -> dict:
-    """Fetch property claims for a Wikidata entity via wbgetentities."""
+    """Fetch property claims for a Wikidata entity via wbgetentities (no SPARQL)."""
     r = await client.get(WIKIDATA_API, params={
         "action": "wbgetentities", "ids": qid, "format": "json",
         "props": "claims", "languages": "en",
@@ -57,7 +52,7 @@ async def get_city_population(city: str) -> str:
                 return f"Could not find a Wikidata QID for {city} via Nominatim."
 
             claims = await _wikidata_claims(client, qid)
-            pop_claims = claims.get("P1082", [])   # population
+            pop_claims = claims.get("P1082", [])
             if not pop_claims:
                 return f"Population data (P1082) not found for {city} on Wikidata ({qid})."
 
@@ -79,7 +74,7 @@ async def get_city_area(city: str) -> str:
                 return f"Could not find a Wikidata QID for {city} via Nominatim."
 
             claims = await _wikidata_claims(client, qid)
-            area_claims = claims.get("P2046", [])  # area in km²
+            area_claims = claims.get("P2046", [])
             if not area_claims:
                 return f"Area data (P2046) not found for {city} on Wikidata ({qid})."
 
@@ -90,25 +85,16 @@ async def get_city_area(city: str) -> str:
         except Exception as e:
             return f"Error fetching area for {city}: {str(e)}"
 
+
 async def main():
-    llm = create_llm("deepseek")
-
-    agent = PlannerAgent(
-        "Researcher",
-        llm=llm,
-        tools=[get_city_population, get_city_area],
-        enable_replan=True,
-        max_step_iterations=3,
-    )
-
-    result = await agent.run(
-        "Compare the population of Tokyo, New York, and London. "
-        "Which city is the most densely populated? "
-        "Show the calculations."
-    )
-
-    print("\n" + "=" * 60)
-    print("RESULT:", result)
+    cities = ["Tokyo", "London", "New York City"]
+    for city in cities:
+        print(f"=== {city} ===")
+        pop_result  = await get_city_population(city=city)
+        area_result = await get_city_area(city=city)
+        print(f"  Population: {pop_result}")
+        print(f"  Area:       {area_result}")
+        print()
 
 
 if __name__ == "__main__":
