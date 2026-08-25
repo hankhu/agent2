@@ -8,7 +8,6 @@ Example ``~/.config/agent2/config.json``::
 
     {
         "llm": {
-            "provider": "openai",
             "model": "gpt-4o-mini",
             "temperature": 0.7,
             "max_tokens": 4096,
@@ -16,20 +15,19 @@ Example ``~/.config/agent2/config.json``::
             "base_url": null
         },
         "models": {
-            "openai": {"model": "gpt-4o-mini"},
-            "my-claude": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"}
+            "deepseek": {
+                "model": "deepseek-chat",
+                "base_url": "https://api.deepseek.com/v1",
+                "api_key": "sk-..."
+            },
+            "local": {
+                "model": "llama3.1",
+                "base_url": "http://localhost:11434/v1"
+            }
         }
     }
 
-The ``models`` field is a dict where each entry maps a *key* to LLM kwargs:
-
-* If the key is a **known provider** (``openai``, ``anthropic``, ``google``,
-  ``ollama``), the value dict is passed directly as kwargs to
-  :func:`~agent2.llm.create_llm` with that provider.
-* Otherwise the value dict **must** contain a ``"provider"`` field; the
-  remaining fields become kwargs.
-
-Use :func:`load_models` to obtain a ``dict[str, BaseLLM]``.
+Use :func:`load_models` to obtain a ``dict[str, OpenAILLM]``.
 """
 
 from __future__ import annotations
@@ -40,10 +38,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-# ── Known providers ──────────────────────────────────────────────────
-
-KNOWN_PROVIDERS: frozenset[str] = frozenset({"openai", "anthropic", "google", "ollama"})
-
 # ── Data Models ─────────────────────────────────────────────────────
 
 
@@ -52,11 +46,11 @@ class LLMConfig(BaseModel):
 
     provider: str = Field(
         default="openai",
-        description="LLM provider: openai | anthropic | google | ollama",
+        description="LLM provider (OpenAI-compatible)",
     )
     model: str = Field(
         default="gpt-4o-mini",
-        description="Model identifier for the chosen provider",
+        description="Model identifier",
     )
     temperature: float = Field(
         default=0.7,
@@ -68,11 +62,11 @@ class LLMConfig(BaseModel):
     )
     api_key: str | None = Field(
         default=None,
-        description="API key (provider-specific)",
+        description="API key",
     )
     base_url: str | None = Field(
         default=None,
-        description="Custom base URL for the API endpoint",
+        description="Custom base URL for OpenAI-compatible endpoint",
     )
 
 
@@ -83,9 +77,8 @@ class AppConfig(BaseModel):
     models: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Named model definitions. Each key maps to a dict of kwargs for "
-            "create_llm. If the key is a known provider name the dict is used "
-            "directly; otherwise a 'provider' field must be present inside the dict."
+            "Named model definitions. Each key maps to a dict of kwargs for create_llm "
+            "or a model name string."
         ),
     )
 
@@ -115,24 +108,10 @@ def load_config() -> AppConfig:
 def load_models() -> dict[str, Any]:
     """Instantiate LLMs from the ``models`` section of the config file.
 
-    Each entry in ``config.models`` is resolved as follows:
-
-    * **Known provider key** (``openai`` / ``anthropic`` / ``google`` /
-      ``ollama``): the value dict is forwarded verbatim as kwargs to
-      :func:`~agent2.llm.create_llm`.
-    * **Custom key**: the value dict must contain a ``"provider"`` field
-      that identifies the provider; all other fields become kwargs.
-
     Returns
     -------
-    dict[str, BaseLLM]
-        Mapping of model name → instantiated :class:`~agent2.llm.BaseLLM`.
-
-    Raises
-    ------
-    ValueError
-        If a custom-key entry is missing the ``"provider"`` field, or if
-        the provider is unknown.
+    dict[str, OpenAILLM]
+        Mapping of model name → instantiated LLM instance.
     """
     from agent2.llm import create_llm
 
@@ -140,25 +119,15 @@ def load_models() -> dict[str, Any]:
     instances: dict[str, Any] = {}
 
     for key, value in config.models.items():
-        if not isinstance(value, dict):
-            raise ValueError(
-                f"models[{key!r}]: expected a dict of kwargs, got {type(value).__name__!r}"
-            )
-
-        key_lower = key.lower().strip()
-        if key_lower in KNOWN_PROVIDERS:
-            # Key itself is the provider name — use value as kwargs directly.
-            provider = key_lower
+        if isinstance(value, dict):
             kwargs = dict(value)
+            kwargs.pop("provider", None)
+            instances[key] = create_llm(key, **kwargs)
+        elif isinstance(value, str):
+            instances[key] = create_llm(model=value)
         else:
-            # Custom alias — must contain a "provider" field.
-            kwargs = dict(value)
-            provider = kwargs.pop("provider", None)
-            if provider is None:
-                raise ValueError(
-                    f"models[{key!r}]: not a known provider and missing 'provider' field"
-                )
-
-        instances[key] = create_llm(provider, **kwargs)
+            raise ValueError(
+                f"models[{key!r}]: expected a dict or model string, got {type(value).__name__!r}"
+            )
 
     return instances

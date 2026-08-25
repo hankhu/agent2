@@ -6,7 +6,7 @@
 
 | 特性 | 说明 |
 |------|------|
-| 🧠 **LLM 抽象层** | 统一接口支持 OpenAI / Anthropic / Google / Ollama |
+| 🧠 **LLM 抽象层** | 统一 OpenAI 兼容接口，支持 OpenAI / DeepSeek / Ollama / vLLM / Qwen 等 |
 | 🔧 **工具系统** | `@tool` 装饰器自动生成 JSON Schema，支持同步/异步 |
 | 🔄 **ReAct 模式** | Thought → Action → Observation 推理循环 |
 | 📋 **Plan-and-Execute** | 先规划后执行，支持动态重规划 |
@@ -19,10 +19,6 @@
 ```bash
 # 安装
 uv pip install -e "."
-
-# 安装 LLM 提供商 SDK（按需）
-uv pip install -e ".[openai]"      # OpenAI
-uv pip install -e ".[all-llm]"     # 所有 LLM
 
 # 设置 API Key
 export AGENT2_OPENAI_API_KEY=sk-...

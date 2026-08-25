@@ -51,9 +51,8 @@ def _build_llm(args: argparse.Namespace) -> BaseLLM:
 
     # CLI --model overrides config
     model = args.model or llm_cfg.model
-    provider = llm_cfg.provider
 
-    kwargs: dict[str, object] = {
+    kwargs: dict[str, Any] = {
         "model": model,
         "temperature": llm_cfg.temperature,
         "max_tokens": llm_cfg.max_tokens,
@@ -63,7 +62,7 @@ def _build_llm(args: argparse.Namespace) -> BaseLLM:
     if llm_cfg.base_url:
         kwargs["base_url"] = llm_cfg.base_url
 
-    return create_llm(provider, **kwargs)
+    return create_llm(**kwargs)
 
 
 async def _single_chat(

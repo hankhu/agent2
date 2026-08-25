@@ -103,7 +103,7 @@ async def get_city_area(city: str) -> str:
             return f"Error fetching area for {city}: {str(e)}"
 
 async def main():
-    llm = create_llm("deepseek")
+    llm = create_llm("deepseek", model='deepseek-v4-flash')
 
     agent = PlannerAgent(
         "Researcher",

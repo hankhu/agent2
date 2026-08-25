@@ -1,10 +1,10 @@
-"""LLM abstraction layer — unified interface for multiple providers.
+"""LLM abstraction layer — OpenAI-compatible interface for all models.
 
 Quick start::
 
     from agent2.llm import create_llm, Message
 
-    llm = create_llm("openai", model="gpt-4o-mini")
+    llm = create_llm(model="gpt-4o-mini")
     response = await llm.chat([Message.user("Hello!")])
     print(response.content)
 """
@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent2.llm.base import BaseLLM
+from agent2.llm.openai import OpenAILLM
 from agent2.llm.message import (
     LLMResponse,
     Message,
@@ -27,6 +28,7 @@ from agent2.llm.message import (
 
 __all__ = [
     "BaseLLM",
+    "OpenAILLM",
     "LLMResponse",
     "Message",
     "Role",
@@ -39,88 +41,55 @@ __all__ = [
 ]
 
 
-def create_llm(provider: str, **kwargs: Any) -> BaseLLM:
-    """Factory function to create an LLM instance by provider name.
+def create_llm(name_or_model: str = "openai", **kwargs: Any) -> OpenAILLM:
+    """Factory function to create an OpenAI-compatible LLM instance.
 
     Parameters
     ----------
-    provider : str
-        A built-in provider name (``"openai"``, ``"anthropic"``, ``"google"``,
-        ``"ollama"``) **or** any key defined in the ``models`` dict of
-        ``~/.config/agent2/config.json``.
+    name_or_model : str
+        A model name (e.g. ``"gpt-4o"``, ``"deepseek-chat"``), a preset name
+        (``"openai"``, ``"ollama"``), or a key defined in the ``models`` dict
+        of ``~/.config/agent2/config.json``.
     **kwargs
-        Passed directly to the provider constructor.  When the provider is
-        resolved from the config file these kwargs are merged on top of the
-        config values (caller wins on conflicts).
+        Passed directly to :class:`OpenAILLM` (e.g. ``model``, ``api_key``,
+        ``base_url``, ``temperature``, ``max_tokens``). Caller kwargs override
+        config values.
 
     Returns
     -------
-    BaseLLM
+    OpenAILLM
         A configured LLM instance.
-
-    Examples
-    --------
-    >>> llm = create_llm("openai", model="gpt-4o")
-    >>> llm = create_llm("anthropic", model="claude-sonnet-4-20250514")
-    >>> llm = create_llm("ollama", model="llama3.1")
-    >>> llm = create_llm("deepseek")  # resolved from config models dict
     """
-    provider_key = provider.lower().strip()
+    key = name_or_model.lower().strip()
 
-    if provider_key == "openai":
-        from agent2.llm.openai import OpenAILLM
+    # 1. Check user config file (~/.config/agent2/config.json)
+    try:
+        from agent2.app.config import load_config
+        config = load_config()
+        if name_or_model in config.models:
+            entry = config.models[name_or_model]
+            if isinstance(entry, dict):
+                config_kwargs = dict(entry)
+                config_kwargs.pop("provider", None)
+                merged = {**config_kwargs, **kwargs}
+                return OpenAILLM(**merged)
+            elif isinstance(entry, str):
+                return OpenAILLM(model=entry, **kwargs)
+    except Exception:
+        pass
+
+    # 2. Built-in presets
+    if key in ("openai", "default"):
         return OpenAILLM(**kwargs)
-    elif provider_key == "anthropic":
-        from agent2.llm.anthropic import AnthropicLLM
-        return AnthropicLLM(**kwargs)
-    elif provider_key == "google":
-        from agent2.llm.google import GoogleLLM
-        return GoogleLLM(**kwargs)
-    elif provider_key == "ollama":
-        from agent2.llm.ollama import OllamaLLM
-        return OllamaLLM(**kwargs)
-    else:
-        # Fall back to the user config models dict.
-        return _create_llm_from_config(provider_key, **kwargs)
+    elif key == "ollama":
+        defaults: dict[str, Any] = {
+            "model": "llama3.1",
+            "base_url": "http://localhost:11434/v1",
+            "api_key": "ollama",
+        }
+        return OpenAILLM(**{**defaults, **kwargs})
 
-
-def _create_llm_from_config(key: str, **kwargs: Any) -> BaseLLM:
-    """Resolve *key* from ``~/.config/agent2/config.json`` ``models`` dict.
-
-    The config entry supplies the base provider + kwargs; any extra *kwargs*
-    passed here override the config values.
-    """
-    from agent2.app.config import KNOWN_PROVIDERS, load_config
-
-    config = load_config()
-    models = config.models
-
-    if key not in models:
-        raise ValueError(
-            f"Unknown LLM provider: {key!r}. "
-            f"Built-in providers: openai, anthropic, google, ollama. "
-            f"Config-defined models: {sorted(models) or '(none)'}"
-        )
-
-    entry = models[key]
-    if not isinstance(entry, dict):
-        raise ValueError(
-            f"models[{key!r}]: expected a dict of kwargs, got {type(entry).__name__!r}"
-        )
-
-    if key in KNOWN_PROVIDERS:
-        # Key is itself the provider name.
-        resolved_provider = key
-        config_kwargs: dict[str, Any] = dict(entry)
-    else:
-        # Custom alias — must contain a "provider" field.
-        config_kwargs = dict(entry)
-        resolved_provider = config_kwargs.pop("provider", None)
-        if resolved_provider is None:
-            raise ValueError(
-                f"models[{key!r}]: not a known provider and missing 'provider' field"
-            )
-
-    # Caller kwargs win over config values.
-    merged = {**config_kwargs, **kwargs}
-    return create_llm(resolved_provider, **merged)
+    # 3. Direct model name
+    if "model" not in kwargs:
+        kwargs["model"] = name_or_model
+    return OpenAILLM(**kwargs)

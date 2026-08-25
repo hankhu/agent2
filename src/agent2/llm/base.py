@@ -1,8 +1,4 @@
-"""Abstract base class for LLM providers.
-
-Every concrete provider (OpenAI, Anthropic, Google, Ollama) must subclass
-:class:`BaseLLM` and implement :meth:`chat`.
-"""
+"""Abstract base class for LLM providers."""
 
 from __future__ import annotations
 

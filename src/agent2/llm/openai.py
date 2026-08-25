@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, AsyncIterator
 
 from agent2.llm.base import BaseLLM
 from agent2.llm.message import (
@@ -17,16 +17,16 @@ from agent2.llm.message import (
 
 
 class OpenAILLM(BaseLLM):
-    """Adapter for OpenAI's Chat Completions API.
+    """Adapter for OpenAI and OpenAI-compatible Chat Completions APIs.
 
     Parameters
     ----------
     model : str
-        Model name, e.g. ``"gpt-4o-mini"``, ``"gpt-4o"``.
+        Model name, e.g. ``"gpt-4o-mini"``, ``"deepseek-chat"``.
     api_key : str | None
         API key. Falls back to ``AGENT2_OPENAI_API_KEY`` or ``OPENAI_API_KEY``.
     base_url : str | None
-        Custom base URL (for Azure, proxies, etc.).
+        Custom base URL (for DeepSeek, Ollama, vLLM, proxies, etc.).
     """
 
     def __init__(
@@ -50,8 +50,7 @@ class OpenAILLM(BaseLLM):
                 from openai import AsyncOpenAI
             except ImportError as e:
                 raise ImportError(
-                    "openai package is required. Install with: "
-                    "uv pip install 'agent2[openai]'"
+                    "openai package is required. Install with: uv add openai"
                 ) from e
 
             kwargs: dict[str, Any] = {}
@@ -61,9 +60,10 @@ class OpenAILLM(BaseLLM):
                 api_key = settings.openai_api_key
             if api_key:
                 kwargs["api_key"] = api_key
+
             if self._base_url:
                 kwargs["base_url"] = self._base_url
-            elif (from_settings := None) is None:
+            else:
                 from agent2.utils.config import settings as s
                 if s.openai_base_url:
                     kwargs["base_url"] = s.openai_base_url
@@ -100,6 +100,34 @@ class OpenAILLM(BaseLLM):
 
         response = await client.chat.completions.create(**req)
         return self._from_oai_response(response)
+
+    async def chat_stream(
+        self,
+        messages: list[Message],
+        *,
+        tools: list[ToolSchema] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        client = self._get_client()
+
+        oai_messages = [self._to_oai_message(m) for m in messages]
+
+        req: dict[str, Any] = {
+            "model": self.model,
+            "messages": oai_messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "stream": True,
+            **kwargs,
+        }
+
+        if tools:
+            req["tools"] = [self._to_oai_tool(t) for t in tools]
+
+        stream = await client.chat.completions.create(**req)
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
 
     # ── Format conversion ───────────────────────────────────────────
 

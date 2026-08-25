@@ -19,9 +19,9 @@ from agent2.tools.builtin import python_exec
 
 
 async def main():
-    # 1. Create an LLM — switch provider by changing the first argument
-    #llm = create_llm("openai", model="gpt-4o-mini")
-    #llm = create_llm("ollama", model="gemma4:e2b")
+    # 1. Create an LLM — supports any OpenAI-compatible endpoint
+    # llm = create_llm(model="gpt-4o-mini")
+    # llm = create_llm("ollama", model="llama3.1")
     llm = create_llm("deepseek")
 
     # 2. Create a ReAct agent with a code execution tool

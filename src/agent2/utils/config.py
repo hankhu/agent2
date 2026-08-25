@@ -18,11 +18,11 @@ class Settings(BaseSettings):
     # ── LLM Defaults ────────────────────────────────────────────────
     default_llm_provider: str = Field(
         default="openai",
-        description="Default LLM provider: openai | anthropic | google | ollama",
+        description="Default LLM provider (OpenAI-compatible)",
     )
     default_model: str = Field(
         default="gpt-4o-mini",
-        description="Default model name for the chosen provider",
+        description="Default model name",
     )
     default_temperature: float = Field(
         default=0.7,
@@ -33,12 +33,9 @@ class Settings(BaseSettings):
         description="Default max tokens for LLM responses",
     )
 
-    # ── API Keys ────────────────────────────────────────────────────
+    # ── API Keys & Endpoints ─────────────────────────────────────────
     openai_api_key: str | None = Field(default=None)
     openai_base_url: str | None = Field(default=None)
-    anthropic_api_key: str | None = Field(default=None)
-    google_api_key: str | None = Field(default=None)
-    ollama_base_url: str = Field(default="http://localhost:11434")
 
     # ── Agent Defaults ──────────────────────────────────────────────
     agent_max_iterations: int = Field(
