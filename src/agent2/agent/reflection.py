@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent2.llm.base import BaseLLM
-from agent2.llm.message import Message
+from agent2.llm.message import Message, Role
 from agent2.utils.logging import AgentLogger
 
 
@@ -49,17 +49,18 @@ class ReflectionMixin:
     max_reflections: int = 2
     reflection_threshold: int = 7  # Minimum score (1-10) to pass
 
-    async def run(self, task: str) -> str:
-        """Override run() to add reflection loop."""
-        # Get the base agent's run result
-        result = await super().run(task)  # type: ignore[misc]
+    async def chat(self, msg: str | Message) -> str:
+        """Override chat() to add reflection loop."""
+        # Get the base agent's chat result
+        result = await super().chat(msg)  # type: ignore[misc]
 
+        task_str = msg if isinstance(msg, str) else (msg.content or "")
         # Access the logger from the base agent
         log: AgentLogger = getattr(self, "log", AgentLogger("reflection"))
         llm: BaseLLM = getattr(self, "llm")
 
         for attempt in range(self.max_reflections):
-            evaluation = await self._reflect(llm, task, result)
+            evaluation = await self._reflect(llm, task_str, result)
 
             if evaluation.get("passed", True):
                 return result
@@ -72,10 +73,14 @@ class ReflectionMixin:
             )
 
             # Retry with feedback
-            result = await self._retry_with_feedback(llm, task, result, feedback)
+            result = await self._retry_with_feedback(llm, task_str, result, feedback)
             log.final_answer(result)
 
+        if hasattr(self, "_messages") and self._messages and self._messages[-1].role == Role.ASSISTANT:
+            self._messages[-1].content = result
+
         return result
+
 
     @staticmethod
     async def _reflect(

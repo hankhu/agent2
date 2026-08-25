@@ -12,10 +12,14 @@ from agent2.agent.react import ReActAgent
 from agent2.agent.planner import PlannerAgent
 from agent2.agent.reflection import ReflectionMixin
 
+Agent = ReActAgent
+
 __all__ = [
+    "Agent",
     "BaseAgent",
     "MaxIterationsExceeded",
     "ReActAgent",
     "PlannerAgent",
     "ReflectionMixin",
 ]
+

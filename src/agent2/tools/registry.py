@@ -67,6 +67,12 @@ class ToolRegistry:
     def __len__(self) -> int:
         return len(self._tools)
 
+    def copy(self) -> ToolRegistry:
+        """Return a shallow copy of this registry with independent tool mapping."""
+        new_registry = ToolRegistry()
+        new_registry._tools = dict(self._tools)
+        return new_registry
+
     def __repr__(self) -> str:
         names = list(self._tools.keys())
         return f"ToolRegistry(tools={names})"

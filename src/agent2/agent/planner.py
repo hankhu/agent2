@@ -77,9 +77,9 @@ class PlannerAgent(BaseAgent):
 
     def __init__(
         self,
-        name: str,
+        name: str = "planner_agent",
         *,
-        llm: BaseLLM,
+        llm: BaseLLM | None = None,
         system_prompt: str | None = None,
         tools: list[Tool] | None = None,
         max_iterations: int | None = None,
