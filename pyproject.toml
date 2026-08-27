@@ -1,6 +1,6 @@
 [project]
 name = "agent2"
-version = "0.1.1b"
+version = "0.1.2a"
 description = "A modular agent system framework for learning and research"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -33,5 +33,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.13"
 strict = true

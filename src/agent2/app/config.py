@@ -7,23 +7,24 @@ used when it does not exist.
 Example ``~/.config/agent2/config.json``::
 
     {
-        "llm": {
-            "model": "gpt-4o-mini",
-            "temperature": 0.7,
-            "max_tokens": 4096,
-            "api_key": null,
-            "base_url": null
-        },
-        "models": {
+        "default": "gpt-4o-mini",
+        "providers": {
+            "openai": {
+                "api_key": "sk-..."
+            },
             "deepseek": {
-                "model": "deepseek-chat",
                 "base_url": "https://api.deepseek.com/v1",
                 "api_key": "sk-..."
             },
-            "local": {
-                "model": "llama3.1",
+            "ollama": {
                 "base_url": "http://localhost:11434/v1"
             }
+        },
+        "models": {
+            "gpt-4o-mini": { "provider": "openai" },
+            "deepseek": { "provider": "deepseek", "model_id": "deepseek-chat" },
+            "deepseek-r1": { "provider": "deepseek", "model_id": "deepseek-reasoner" },
+            "llama3.1": { "provider": "ollama" }
         }
     }
 
@@ -36,13 +37,26 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ── Data Models ─────────────────────────────────────────────────────
 
 
+class ProviderConfig(BaseModel):
+    """Provider endpoint and credential definition."""
+
+    base_url: str | None = Field(
+        default=None,
+        description="Custom base URL for OpenAI-compatible endpoint",
+    )
+    api_key: str | None = Field(
+        default=None,
+        description="API key for the provider",
+    )
+
+
 class LLMConfig(BaseModel):
-    """LLM-related parameters stored in config.json."""
+    """Backward-compatibility view for LLM parameters."""
 
     provider: str = Field(
         default="openai",
@@ -71,16 +85,146 @@ class LLMConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
-    """Top-level application configuration."""
+    """Top-level application configuration.
 
-    llm: LLMConfig = Field(default_factory=LLMConfig)
+    Eliminates redundancy by separating provider credentials (``providers``)
+    from model aliases (``models``), with a concise top-level ``default`` model pointer.
+    """
+
+    default: str = Field(
+        default="gpt-4o-mini",
+        description="Default model alias or identifier",
+    )
+    temperature: float = Field(
+        default=0.7,
+        description="Default sampling temperature",
+    )
+    max_tokens: int = Field(
+        default=4096,
+        description="Default maximum tokens for responses",
+    )
+    providers: dict[str, ProviderConfig] = Field(
+        default_factory=dict,
+        description="Named provider endpoints and credentials (e.g. openai, deepseek, ollama)",
+    )
     models: dict[str, Any] = Field(
         default_factory=dict,
-        description=(
-            "Named model definitions. Each key maps to a dict of kwargs for create_llm "
-            "or a model name string."
-        ),
+        description="Named model definitions or aliases mapped to provider/model parameters",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_config(cls, data: Any) -> Any:
+        """Migrate legacy ``llm`` section into ``default``, ``providers``, etc."""
+        if not isinstance(data, dict):
+            return data
+        if "llm" in data and isinstance(data["llm"], dict):
+            llm_obj = data["llm"]
+            if "default" not in data and "model" in llm_obj:
+                data["default"] = llm_obj["model"]
+            if "temperature" not in data and "temperature" in llm_obj:
+                data["temperature"] = llm_obj["temperature"]
+            if "max_tokens" not in data and "max_tokens" in llm_obj:
+                data["max_tokens"] = llm_obj["max_tokens"]
+            if "providers" not in data:
+                data["providers"] = {}
+            if "default" not in data["providers"] and (llm_obj.get("base_url") or llm_obj.get("api_key")):
+                data["providers"]["default"] = {
+                    "base_url": llm_obj.get("base_url"),
+                    "api_key": llm_obj.get("api_key"),
+                }
+        return data
+
+    @property
+    def llm(self) -> LLMConfig:
+        """Backward-compatibility property returning default LLM parameters."""
+        provider_name = "default" if "default" in self.providers else "openai"
+        prov = self.providers.get(provider_name) or self.providers.get("openai")
+        base_url = prov.base_url if prov else None
+        api_key = prov.api_key if prov else None
+        return LLMConfig(
+            provider=provider_name,
+            model=self.default,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            api_key=api_key,
+            base_url=base_url,
+        )
+
+    def resolve_model(self, name_or_alias: str) -> dict[str, Any] | None:
+        """Resolve a model name or alias with provider inheritance."""
+        key = name_or_alias.strip()
+        key_l = key.lower()
+
+        # 1. Exact match in models
+        entry = self.models.get(key) or self.models.get(key_l)
+
+        # 2. Substring / fuzzy match in models
+        if entry is None:
+            best_entry: Any = None
+            best_len = -1
+            for cfg_key, cfg_val in self.models.items():
+                cfg_key_l = cfg_key.lower()
+                cfg_model_l = ""
+                if isinstance(cfg_val, dict):
+                    cfg_model_l = str(cfg_val.get("model_id") or cfg_val.get("model", "")).lower()
+                elif isinstance(cfg_val, str):
+                    cfg_model_l = cfg_val.lower()
+                for candidate in (cfg_key_l, cfg_model_l):
+                    if candidate and (candidate == key_l or candidate in key_l or key_l in candidate):
+                        if len(candidate) > best_len:
+                            best_len = len(candidate)
+                            best_entry = cfg_val
+            entry = best_entry
+
+        # 3. Resolve matched model entry
+        if entry is not None:
+            if isinstance(entry, dict):
+                res = dict(entry)
+                provider_name = res.pop("provider", None)
+                if provider_name and provider_name in self.providers:
+                    p = self.providers[provider_name]
+                    if p.base_url and "base_url" not in res:
+                        res["base_url"] = p.base_url
+                    if p.api_key and "api_key" not in res:
+                        res["api_key"] = p.api_key
+                model_id = res.pop("model_id", None) or res.pop("model", None) or key
+                res["model"] = model_id
+                if "temperature" not in res:
+                    res["temperature"] = self.temperature
+                if "max_tokens" not in res:
+                    res["max_tokens"] = self.max_tokens
+                return res
+            elif isinstance(entry, str):
+                if entry in self.providers:
+                    p = self.providers[entry]
+                    return {
+                        "model": key,
+                        "base_url": p.base_url,
+                        "api_key": p.api_key,
+                        "temperature": self.temperature,
+                        "max_tokens": self.max_tokens,
+                    }
+                return {
+                    "model": entry,
+                    "temperature": self.temperature,
+                    "max_tokens": self.max_tokens,
+                }
+
+
+        # 4. If name_or_alias matches a provider name directly
+        if key_l in self.providers or key in self.providers:
+            p = self.providers.get(key) or self.providers.get(key_l)
+            if p:
+                return {
+                    "model": key,
+                    "base_url": p.base_url,
+                    "api_key": p.api_key,
+                    "temperature": self.temperature,
+                    "max_tokens": self.max_tokens,
+                }
+
+        return None
 
 
 # ── Loader ──────────────────────────────────────────────────────────
@@ -127,7 +271,7 @@ def load_config() -> AppConfig:
 
 
 def load_models() -> dict[str, Any]:
-    """Instantiate LLMs from the ``models`` section of the config file.
+    """Instantiate LLMs from the ``models`` and ``providers`` sections.
 
     Returns
     -------
@@ -139,16 +283,12 @@ def load_models() -> dict[str, Any]:
     config = load_config()
     instances: dict[str, Any] = {}
 
-    for key, value in config.models.items():
-        if isinstance(value, dict):
-            kwargs = dict(value)
-            kwargs.pop("provider", None)
-            instances[key] = create_llm(key, **kwargs)
-        elif isinstance(value, str):
-            instances[key] = create_llm(model=value)
-        else:
-            raise ValueError(
-                f"models[{key!r}]: expected a dict or model string, got {type(value).__name__!r}"
-            )
+    for key in config.models:
+        instances[key] = create_llm(key)
+
+    for p_key in config.providers:
+        if p_key not in instances:
+            instances[p_key] = create_llm(p_key)
 
     return instances
+

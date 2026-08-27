@@ -87,7 +87,7 @@ class OpenAILLM(BaseLLM):
         client = self._get_client()
 
         # Convert messages to OpenAI format
-        oai_messages = [self._to_oai_message(m) for m in messages]
+        oai_messages = [self._to_oai_message(m) for m in self._repair_tool_messages(messages)]
 
         # Build request kwargs
         req: dict[str, Any] = {
@@ -114,7 +114,7 @@ class OpenAILLM(BaseLLM):
     ) -> AsyncIterator[str]:
         client = self._get_client()
 
-        oai_messages = [self._to_oai_message(m) for m in messages]
+        oai_messages = [self._to_oai_message(m) for m in self._repair_tool_messages(messages)]
 
         req: dict[str, Any] = {
             "model": self.model,
@@ -134,6 +134,47 @@ class OpenAILLM(BaseLLM):
                 yield chunk.choices[0].delta.content
 
     # ── Format conversion ───────────────────────────────────────────
+
+    @staticmethod
+    def _repair_tool_messages(messages: list[Message]) -> list[Message]:
+        """Return a copy with complete tool responses after tool_calls.
+
+        OpenAI-compatible APIs reject assistant messages that contain
+        ``tool_calls`` unless every ``tool_call_id`` is answered by a following
+        ``tool`` message.  This guard repairs incomplete histories before they
+        are sent to the API.
+        """
+        repaired = list(messages)
+        i = 0
+        while i < len(repaired):
+            msg = repaired[i]
+            if msg.role == Role.ASSISTANT and msg.tool_calls:
+                expected = {tc.id for tc in msg.tool_calls}
+                j = i + 1
+                found: set[str] = set()
+                while j < len(repaired) and repaired[j].role == Role.TOOL:
+                    if repaired[j].tool_result is not None:
+                        found.add(repaired[j].tool_result.tool_call_id)
+                    j += 1
+                missing = expected - found
+                if missing:
+                    insert_at = j
+                    for tool_call_id in sorted(missing):
+                        repaired.insert(
+                            insert_at,
+                            Message.tool(
+                                tool_call_id,
+                                "Tool execution did not return a result.",
+                                is_error=True,
+                            ),
+                        )
+                        insert_at += 1
+                    i = insert_at
+                    continue
+                i = j
+            else:
+                i += 1
+        return repaired
 
     @staticmethod
     def _to_oai_message(msg: Message) -> dict[str, Any]:

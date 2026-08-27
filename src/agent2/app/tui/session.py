@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -76,9 +77,20 @@ class SessionManager:
 
 
 def _extract_title(agent_data: dict[str, Any]) -> str:
-    """Try to derive a short title from the first user message."""
+    """Try to derive a short, readable title from the first user message."""
     for msg in agent_data.get("messages", []):
-        if msg.get("role") == "user" and msg.get("content"):
-            text = msg["content"]
-            return text[:60] + ("…" if len(text) > 60 else "")
+        if msg.get("role") != "user" or not msg.get("content"):
+            continue
+        text = msg["content"]
+        # Remove injected file/directory context so titles stay readable.
+        text = re.sub(r"<file\b[^>]*>.*?</file>", " ", text, flags=re.S)
+        text = re.sub(r"<directory\b[^>]*>.*?</directory>", " ", text, flags=re.S)
+        text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
+        # Collapse whitespace/newlines into a single line.
+        cleaned = " ".join(text.split()).strip()
+        if not cleaned:
+            cleaned = " ".join(text.split()).strip() or "(untitled)"
+        if len(cleaned) > 60:
+            cleaned = cleaned[:60].rstrip() + "…"
+        return cleaned
     return ""

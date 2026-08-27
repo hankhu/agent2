@@ -65,8 +65,13 @@ class TUIReActAgent(ReActAgent):
                     self._auto_approved.add(tc.name)
 
             self.log.action(tc.name, tc.arguments)
-            output = await self.tool_registry.execute(tc.name, **tc.arguments)
-            is_error = output.startswith("Error")
+            try:
+                output = await self.tool_registry.execute(tc.name, **tc.arguments)
+            except Exception as exc:
+                output = f"Error executing {tc.name}: {exc}"
+                is_error = True
+            else:
+                is_error = output.startswith("Error")
             self.log.observation(output, is_error=is_error)
             results.append(Message.tool(tc.id, output, is_error=is_error))
         return results
@@ -137,17 +142,7 @@ class Agent2App(App):  # type: ignore[type-arg]
     # ── public helpers used by ChatScreen ────────────────────────
 
     def switch_model(self, model_name: str) -> None:
-        cfg = load_config()
-        llm_cfg = cfg.llm
-        kwargs: dict[str, Any] = {
-            "temperature": llm_cfg.temperature,
-            "max_tokens": llm_cfg.max_tokens,
-        }
-        if llm_cfg.api_key:
-            kwargs["api_key"] = llm_cfg.api_key
-        if llm_cfg.base_url:
-            kwargs["base_url"] = llm_cfg.base_url
-        self.agent.llm = create_llm(model_name, **kwargs)
+        self.agent.llm = create_llm(model_name)
         set_last_model(self.agent.llm.model)
 
     def new_session_id(self) -> None:
@@ -178,19 +173,9 @@ def build_tui_agent(
 ) -> TUIReActAgent:
     """Create a :class:`TUIReActAgent` with sensible defaults."""
     cfg = load_config()
-    llm_cfg = cfg.llm
-    name_or_model = model or get_last_model() or llm_cfg.model
+    name_or_model = model or get_last_model() or cfg.default or cfg.llm.model
 
-    kwargs: dict[str, Any] = {
-        "temperature": llm_cfg.temperature,
-        "max_tokens": llm_cfg.max_tokens,
-    }
-    if llm_cfg.api_key:
-        kwargs["api_key"] = llm_cfg.api_key
-    if llm_cfg.base_url:
-        kwargs["base_url"] = llm_cfg.base_url
-
-    llm = create_llm(name_or_model, **kwargs)
+    llm = create_llm(name_or_model)
     tools: list[Tool] = [] if no_tools else [file_read, file_write, shell_exec]
 
     return TUIReActAgent(
@@ -198,5 +183,6 @@ def build_tui_agent(
         llm=llm,
         system_prompt=system_msg or DEFAULT_SYSTEM_MSG,
         tools=tools,
+
         verbose=True,
     )

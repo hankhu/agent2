@@ -5,7 +5,7 @@ from __future__ import annotations
 import difflib
 from pathlib import Path
 
-from textual.containers import Horizontal, Vertical
+from textual.containers import HorizontalGroup, VerticalGroup
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
@@ -31,7 +31,7 @@ class ConfirmModal(ModalScreen[str]):
         self._arguments = arguments
 
     def compose(self):  # type: ignore[override]
-        with Vertical(id="confirm-dialog"):
+        with VerticalGroup(id="confirm-dialog"):
             yield Static("[bold yellow]⚠  Tool Execution Approval Required[/bold yellow]")
             yield Static(f"\n[bold]Tool:[/bold]  {self._tool_name}")
 
@@ -45,7 +45,7 @@ class ConfirmModal(ModalScreen[str]):
             if diff:
                 yield DiffView(diff, filename=str(self._arguments.get("path", "")))
 
-            with Horizontal(id="confirm-buttons"):
+            with HorizontalGroup(id="confirm-buttons"):
                 yield Button("[y] Approve", variant="success", id="approve")
                 yield Button("[n] Reject", variant="error", id="reject")
                 yield Button("[a] Always Allow", variant="warning", id="always")

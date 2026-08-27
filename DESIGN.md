@@ -1,0 +1,231 @@
+# Agent2 架构设计
+
+> 从零构建的模块化 Agent 系统，核心目标：**可理解、可组合、可扩展**。
+
+---
+
+## 1. 总体架构
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     Application Layer                   │
+│              app.chat (CLI)  /  app.tui (TUI)           │
+├─────────────────────────────────────────────────────────┤
+│                   Orchestration Layer                    │
+│         crew.Sequential / Supervisor / Debate           │
+├─────────────────────────────────────────────────────────┤
+│                      Agent Layer                        │
+│     BaseAgent ← ReActAgent / PlannerAgent               │
+│                   ↕ ReflectionMixin                     │
+├──────────────┬──────────────┬───────────────────────────┤
+│  LLM Layer   │  Tool Layer  │     Memory Layer          │
+│  BaseLLM     │  @tool       │  WorkingMemory            │
+│  OpenAILLM   │  ToolRegistry│  LongTermMemory           │
+│  Message     │  builtin/*   │  BaseMemory               │
+├──────────────┴──────────────┴───────────────────────────┤
+│                    Foundation Layer                      │
+│              utils.config  /  utils.logging              │
+└─────────────────────────────────────────────────────────┘
+```
+
+**设计原则：自底向上依赖，每层只依赖下层，不反向依赖。**
+
+---
+
+## 2. 核心设计模式
+
+### 2.1 适配器模式 — LLM 抽象
+
+```
+BaseLLM (ABC)
+  ├── chat(messages, tools) → LLMResponse
+  └── chat_stream(messages, tools) → AsyncIterator[str]
+        │
+        ▼
+OpenAILLM ── 封装 openai.AsyncOpenAI
+```
+
+- **一个适配器覆盖所有 OpenAI 兼容服务**。不需要为 DeepSeek、Ollama、vLLM 等分别写适配器，只需切换 `base_url` + `api_key`。
+- 消息格式在内部用统一的 `Message` 模型表示，只在 `OpenAILLM` 的边界处做格式转换（`_to_oai_message` / `_from_oai_response`）。
+- 新增提供商只需新建 `BaseLLM` 子类，不影响上层 Agent 代码。
+
+### 2.2 装饰器 + 自省 — 工具系统
+
+```python
+@tool(description="Add two numbers")
+def add(a: int, b: int) -> int:
+    return a + b
+```
+
+- `@tool` 装饰器通过 `inspect.signature()` + `get_type_hints()` 自省函数签名，自动生成 `ToolSchema`（含参数名、类型、是否必填、默认值）。
+- 装饰后的对象是 `Tool` 实例，既可当工具注册给 Agent，也可直接 `await add(a=1, b=2)` 调用。
+- 同步函数自动通过 `asyncio.to_thread()` 在线程池执行，避免阻塞事件循环。
+
+### 2.3 模板方法模式 — Agent 架构
+
+```
+BaseAgent (ABC)
+  ├── chat(msg) → str        # 公共入口，管理消息历史
+  ├── run(task) → str         # reset + chat
+  ├── _run_loop() → str       # 抽象方法，子类实现推理循环
+  └── _execute_tool_calls()   # 共享工具执行逻辑
+        │
+        ├── ReActAgent._run_loop()     # Thought → Action → Observation 循环
+        └── PlannerAgent._run_loop()   # Plan → Execute → Replan → Synthesise
+```
+
+- `chat()` 负责通用逻辑（初始化 system message、追加 user message、异常处理、记录 assistant 回复）。
+- `_run_loop()` 是子类唯一需要实现的抽象方法，专注推理策略。
+- `_execute_tool_calls()` 是所有 Agent 共享的工具执行管线。
+
+### 2.4 Mixin 模式 — 横切关注点
+
+```python
+class MyReflectiveAgent(ReflectionMixin, ReActAgent):
+    pass
+```
+
+- `ReflectionMixin` 通过 `super().chat()` 调用被混入类的 `chat()` 获取初始结果，再追加反思循环。
+- 可与任意 Agent 类组合，不修改原有代码——真正的开闭原则。
+
+### 2.5 策略模式 — 多 Agent 编排
+
+```
+BaseCrew (ABC)
+  ├── run(task) → str              # 公共入口
+  └── _orchestrate(task) → str     # 抽象编排策略
+        │
+        ├── SequentialCrew   → 流水线：A → B → C
+        ├── SupervisorCrew   → 监督者通过 tool-calling 委派
+        └── DebateCrew       → 多轮辩论 + 综合
+```
+
+- Agent 对自己是否在 Crew 中运行完全无感知，保持了 Agent 和编排逻辑的解耦。
+- `SupervisorCrew` 将工人 Agent 包装为 `ToolSchema`，复用 LLM 的原生 tool-calling 能力做调度——不需要额外的路由/分类逻辑。
+
+### 2.6 工厂模式 — LLM 创建
+
+```
+create_llm("deepseek")
+  1. 查用户配置文件 ~/.config/agent2/config.json → models["deepseek"]
+  2. 查内置预设（openai / ollama）
+  3. 作为模型名直接传入 OpenAILLM(model="deepseek")
+```
+
+三级 fallback + 模糊匹配，对外只暴露一个函数。
+
+---
+
+## 3. 数据流
+
+### 3.1 ReAct Agent 单次执行
+
+```
+User Input
+    │
+    ▼
+BaseAgent.chat()
+    ├── 追加 system + user message 到 _messages
+    ▼
+ReActAgent._run_loop()
+    │
+    ├──▶ LLM.chat(_messages, tools) ──▶ LLMResponse
+    │       │
+    │       ├── has_tool_calls? ──Yes──▶ _execute_tool_calls()
+    │       │                               ├── ToolRegistry.execute()
+    │       │                               └── 追加 tool result 到 _messages
+    │       │                               └── continue loop ───┐
+    │       │                                                     │
+    │       └── No (final answer) ──▶ return content              │
+    │                                                             │
+    └──◀──────────────────────────────────────────────────────────┘
+```
+
+### 3.2 PlannerAgent 执行流
+
+```
+User Input
+    │
+    ▼
+_generate_plan()  ──▶ LLM 生成 JSON 步骤列表
+    │
+    ▼
+for each step:
+    _execute_step()  ──▶ 独立消息上下文 + mini ReAct 循环
+    │
+    ├── _maybe_replan()  ──▶ LLM 决定是否修正剩余步骤
+    ▼
+_synthesise()  ──▶ LLM 综合所有步骤结果
+```
+
+### 3.3 SupervisorCrew 委派流
+
+```
+User Task
+    │
+    ▼
+Supervisor LLM.chat(messages, agent_tools)
+    │
+    ├── tool_call: delegate_to_researcher(task=...)
+    │       │
+    │       ▼
+    │   researcher.run(task) ──▶ result
+    │       │
+    │       ▼
+    │   追加 tool result 到 supervisor messages
+    │       │
+    │       └── continue loop ──▶ Supervisor LLM 再次决策
+    │
+    └── no tool_call ──▶ Final Answer
+```
+
+---
+
+## 4. 状态管理设计
+
+### 4.1 对话历史
+
+- `_messages: list[Message]` 是 Agent 的核心状态，完整保留所有角色的消息（含 tool call 和 tool result）。
+- `chat()` 保持历史实现多轮对话；`run()` 每次 `reset()` 实现单次执行语义。
+- `PlannerAgent._execute_step()` 使用**独立的消息列表**，避免步骤间上下文干扰。
+
+### 4.2 Agent 克隆
+
+- `fork()` 通过浅拷贝 Agent + 深拷贝 `_messages` + 复制 `ToolRegistry`，产生独立副本。
+- 适用于并行探索、A/B 测试不同策略。
+
+### 4.3 序列化
+
+- `to_dict()` 序列化：Agent 类型名、配置、消息历史、工具名列表、子类扩展状态（`_get_extra_state()`）。
+- `from_dict()` 反序列化：按类型名解析子类、从 builtin 模块自动恢复工具实例，并执行工具消息自愈。
+
+### 4.4 工具调用完整性保护 (Tool Call Repair Protocol)
+
+- OpenAI 规范约束：如果 Assistant 发起包含 `tool_calls` 的消息，其后续消息中必须且仅能紧跟对应 `tool_call_id` 的 Tool 消息。
+- 系统在 `BaseAgent.chat()`、`BaseAgent.from_dict()` 以及 `OpenAILLM._repair_tool_messages()` 中内置自愈机制：检测并自动补齐因异常、取消或旧存档缺失的 Tool 响应，杜绝 API 400 校验错误。
+
+---
+
+## 5. 配置层次设计
+
+```
+优先级（高 → 低）：
+  代码参数 > 环境变量 (AGENT2_*) > 配置文件 (~/.config/agent2/config.json) > 内置默认值
+```
+
+- **Settings**（`pydantic-settings`）：环境变量自动绑定，单例模式。
+- **AppConfig**（`pydantic.BaseModel`）：
+  - **服务商与模型正交解耦**：采用 `providers`（管理端点与凭据）与 `models`（模型别名与参数）分离的无冗余数据组织方式。
+  - **继承与自愈**：同一 Provider 下的多个 Model 自动继承 `base_url` 与 `api_key`；兼容旧版 `llm` 配置。
+- **Provider 推导**：从 base_url 智能提取服务商标识（deepseek / nvidia / siliconflow / localhost 等）。
+- **last_model**：文件持久化上次选择，提升交互体验。
+
+
+---
+
+## 6. 日志系统设计
+
+- 不使用 Python `logging` 模块，而是自建基于 `rich` 的结构化日志——因为 Agent 推理过程的日志需要**语义化展示**（Thought / Action / Observation 用不同颜色和面板区分），标准 logging 的 level-based 方式不适合。
+- 通过 `verbose` 开关控制是否输出，而非 log level。
+- 每个 Agent / Crew 持有独立的 `AgentLogger` 实例，互不干扰。
+

@@ -340,14 +340,20 @@ class ChatScreen(Screen):
             messages.add_system_message("No saved sessions.")
             return
 
-        listing = "\n".join(
-            f"  {s['id'][:8]}  {s['title'] or '(untitled)'}"
-            for s in sessions[:10]
-        )
-        messages.add_system_message(
-            f"[bold]Recent sessions:[/bold]\n{listing}\n\n"
-            "Use  /resume <id-prefix>  to restore."
-        )
+        from agent2.app.tui.screens.session_select import SessionSelectScreen
+
+        def on_session(session_id: str | None) -> None:
+            if not session_id:
+                return
+            app.load_session(session_id)
+            messages.clear_messages()
+            self._rebuild_messages()
+            self.query_one(StatusBar).model_name = app.agent.llm.model
+            messages.add_system_message(
+                f"🔄 Session {session_id[:8]} restored."
+            )
+
+        self.app.push_screen(SessionSelectScreen(sessions), callback=on_session)
 
     def _rebuild_messages(self) -> None:
         """Re-populate the message list from the agent's history."""

@@ -51,6 +51,45 @@ uv run examples/04_memory.py         # 记忆系统（无需 API Key）
 uv run examples/05_multi_agent.py    # 多 Agent 协作
 ```
 
+## 配置文件 (`~/.config/agent2/config.json`)
+
+Agent2 支持通过用户级配置文件管理服务商凭据与模型别名。文件路径为 `~/.config/agent2/config.json`（可选）：
+
+```json
+{
+  "default": "gpt-4o-mini",
+  "providers": {
+    "openai": {
+      "api_key": "sk-..."
+    },
+    "deepseek": {
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-..."
+    },
+    "qwen": {
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key": "sk-..."
+    },
+    "ollama": {
+      "base_url": "http://localhost:11434/v1"
+    }
+  },
+  "models": {
+    "gpt-4o-mini": { "provider": "openai" },
+    "deepseek": { "provider": "deepseek", "model_id": "deepseek-chat" },
+    "deepseek-r1": { "provider": "deepseek", "model_id": "deepseek-reasoner" },
+    "qwen": { "provider": "qwen", "model_id": "qwen-plus" },
+    "llama3.1": { "provider": "ollama" }
+  }
+}
+```
+
+- **`default`**：默认模型别名或名称（如 `"gpt-4o-mini"`、`"deepseek"`）。
+- **`providers`**：服务商端点与 API Key 集中管理，同服务商下的多模型无需重复配置凭据与 base URL。
+- **`models`**：具名模型别名映射，只需指定所属 `provider` 即可自动继承连接配置。
+
+
+
 ## 架构
 
 ```

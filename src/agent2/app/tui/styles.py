@@ -126,16 +126,18 @@ DiffView {
 /* ── Confirm Modal ──────────────────────────────────────────── */
 
 ConfirmModal {
-    align: center middle;
+    align: center bottom;
+    background: transparent;
 }
 
 ConfirmModal #confirm-dialog {
-    width: 76;
+    width: 100%;
     height: auto;
     max-height: 80%;
-    border: thick $warning;
-    background: $surface;
+    border: none;
+    background: $panel;
     padding: 1 2;
+    margin-bottom: 4;
 }
 
 ConfirmModal #confirm-dialog DiffView {
@@ -178,4 +180,26 @@ ModelSelectScreen DataTable {
 ModelSelectScreen #model-input {
     margin: 1 0 0 0;
 }
+
+/* ── Session Select ─────────────────────────────────────────── */
+
+SessionSelectScreen {
+    align: center middle;
+}
+
+SessionSelectScreen #session-dialog {
+    width: 96;
+    height: auto;
+    max-height: 80%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+SessionSelectScreen DataTable {
+    height: auto;
+    max-height: 20;
+    margin: 1 0;
+}
+
 """

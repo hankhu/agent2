@@ -46,6 +46,9 @@ class ChatInput(TextArea):
             soft_wrap=True,
             **kwargs,
         )
+        self._history: list[str] = []
+        self._history_index: int | None = None
+        self._draft = ""
 
     # Override internal key handler so we intercept *before* TextArea acts.
     async def _on_key(self, event: events.Key) -> None:
@@ -65,10 +68,37 @@ class ChatInput(TextArea):
             event.stop()
             return
 
+        # ── History navigation (Up/Down) ───────────────────────
+        if not self.show_completion and event.key == "up" and self._history:
+            if self._history_index is None:
+                self._draft = self.text
+                self._history_index = len(self._history) - 1
+            elif self._history_index > 0:
+                self._history_index -= 1
+            self.text = self._history[self._history_index]
+            event.prevent_default()
+            event.stop()
+            return
+
+        if not self.show_completion and event.key == "down" and self._history_index is not None:
+            if self._history_index < len(self._history) - 1:
+                self._history_index += 1
+                self.text = self._history[self._history_index]
+            else:
+                self._history_index = None
+                self.text = self._draft
+            event.prevent_default()
+            event.stop()
+            return
+
         # ── Enter to submit (Shift+Enter falls through for newline) ─
         if event.key == "enter":
             text = self.text.strip()
             if text:
+                if not text.startswith("/") and (not self._history or self._history[-1] != text):
+                    self._history.append(text)
+                self._history_index = None
+                self._draft = ""
                 self.post_message(self.Submitted(text))
                 self.clear()
             event.prevent_default()

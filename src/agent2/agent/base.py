@@ -255,6 +255,7 @@ class BaseAgent(ABC):
 
         messages_raw = data.get("messages", [])
         agent._messages = [Message.model_validate(m) for m in messages_raw]
+        agent._repair_tool_messages()
         return agent
 
     @classmethod
@@ -334,6 +335,8 @@ class BaseAgent(ABC):
         user_msg = Message.user(msg) if isinstance(msg, str) else msg
         self._messages.append(user_msg)
 
+        self._repair_tool_messages()
+
         try:
             result = await self._run_loop()
         except MaxIterationsExceeded:
@@ -378,13 +381,63 @@ class BaseAgent(ABC):
 
     # ── Helpers ─────────────────────────────────────────────────────
 
+    def _repair_tool_messages(self) -> None:
+        """Ensure every assistant ``tool_calls`` message has tool responses.
+
+        OpenAI-compatible APIs require each ``tool_call_id`` from an assistant
+        message to be answered by a following ``tool`` message.  This repairs
+        histories that may have been interrupted by an error/cancellation or
+        loaded from an older/incomplete session file.
+        """
+        messages = self._messages
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            if msg.role == Role.ASSISTANT and msg.tool_calls:
+                expected = {tc.id for tc in msg.tool_calls}
+                j = i + 1
+                found: set[str] = set()
+                while j < len(messages) and messages[j].role == Role.TOOL:
+                    if messages[j].tool_result is not None:
+                        found.add(messages[j].tool_result.tool_call_id)
+                    j += 1
+                missing = expected - found
+                if missing:
+                    insert_at = j
+                    for tool_call_id in sorted(missing):
+                        messages.insert(
+                            insert_at,
+                            Message.tool(
+                                tool_call_id,
+                                "Tool execution did not return a result.",
+                                is_error=True,
+                            ),
+                        )
+                        insert_at += 1
+                    i = insert_at
+                    continue
+                i = j
+            else:
+                i += 1
+
     async def _execute_tool_calls(self, tool_calls: list[Any]) -> list[Message]:
-        """Execute a list of tool calls and return result messages."""
+        """Execute a list of tool calls and return result messages.
+
+        Every tool call always produces a tool result, even when execution
+        raises, so the conversation history remains valid for OpenAI-compatible
+        APIs (an assistant ``tool_calls`` message must be followed by one tool
+        message per ``tool_call_id``).
+        """
         results: list[Message] = []
         for tc in tool_calls:
             self.log.action(tc.name, tc.arguments)
-            output = await self.tool_registry.execute(tc.name, **tc.arguments)
-            is_error = output.startswith("Error")
+            try:
+                output = await self.tool_registry.execute(tc.name, **tc.arguments)
+            except Exception as exc:
+                output = f"Error executing {tc.name}: {exc}"
+                is_error = True
+            else:
+                is_error = output.startswith("Error")
             self.log.observation(output, is_error=is_error)
             results.append(Message.tool(tc.id, output, is_error=is_error))
         return results

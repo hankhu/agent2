@@ -85,6 +85,43 @@ def _is_local_or_lan(url: str | None) -> bool:
     return False
 
 
+def _provider_from_url(url: str | None) -> str:
+    """Extract a short provider name from a base URL.
+
+    Examples::
+
+        https://api.deepseek.com/v1       -> deepseek
+        https://integrate.api.nvidia.com  -> nvidia
+        https://api.siliconflow.cn        -> siliconflow
+        http://localhost:11434/v1         -> localhost
+    """
+    if not url:
+        return "default"
+    host = url.lower().strip()
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/", 1)[0]
+    if host.startswith("["):
+        end = host.find("]")
+        host = host[1:end] if end != -1 else host.strip("[]")
+    else:
+        host = host.split(":", 1)[0].strip()
+
+    if not host:
+        return "default"
+    if "default" in host or host.startswith("openai api"):
+        return "default"
+    if host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
+        return host
+    # IP addresses: show the address itself.
+    parts = host.split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        return host
+    if len(parts) >= 2:
+        return parts[-2] or "default"
+    return host
+
+
 def _visible_model(item: dict[str, Any]) -> bool:
     """Hide remote models that have no API key; keep local/LAN models."""
     if item.get("api_key") or settings.api_key:
@@ -104,38 +141,81 @@ def get_available_models() -> list[dict[str, Any]]:
     # 1. Models from config.models
     for name, entry in cfg.models.items():
         if isinstance(entry, dict):
+            provider_name = entry.get("provider")
+            prov = cfg.providers.get(provider_name) if provider_name else None
+            base_url = (
+                entry.get("base_url")
+                or (prov.base_url if prov else None)
+                or cfg.llm.base_url
+                or settings.base_url
+                or "Default endpoint"
+            )
+            api_key = entry.get("api_key") or (prov.api_key if prov else None) or cfg.llm.api_key
             items.append({
                 "name": name,
-                "model": entry.get("model", name),
-                "base_url": entry.get("base_url") or cfg.llm.base_url or settings.base_url or "Default endpoint",
-                "api_key": entry.get("api_key") or cfg.llm.api_key,
-                "source": "config.json",
+                "model": entry.get("model_id") or entry.get("model", name),
+                "base_url": base_url,
+                "provider": provider_name or _provider_from_url(base_url),
+                "api_key": api_key,
+                "source": "config.models",
             })
         elif isinstance(entry, str):
+            prov = cfg.providers.get(entry)
+            if prov:
+                base_url = prov.base_url or settings.base_url or "Default endpoint"
+                api_key = prov.api_key or cfg.llm.api_key
+                items.append({
+                    "name": name,
+                    "model": name,
+                    "base_url": base_url,
+                    "provider": entry,
+                    "api_key": api_key,
+                    "source": "config.models",
+                })
+            else:
+                base_url = cfg.llm.base_url or settings.base_url or "Default endpoint"
+                items.append({
+                    "name": name,
+                    "model": entry,
+                    "base_url": base_url,
+                    "provider": _provider_from_url(base_url),
+                    "api_key": cfg.llm.api_key,
+                    "source": "config.models",
+                })
+
+    # 2. Add any providers not already referenced by a model
+    for p_name, p_cfg in cfg.providers.items():
+        if not any(m.get("provider") == p_name or m.get("name") == p_name for m in items):
+            base_url = p_cfg.base_url or "Default endpoint"
             items.append({
-                "name": name,
-                "model": entry,
-                "base_url": cfg.llm.base_url or settings.base_url or "Default endpoint",
-                "api_key": cfg.llm.api_key,
-                "source": "config.json",
+                "name": p_name,
+                "model": p_name,
+                "base_url": base_url,
+                "provider": p_name,
+                "api_key": p_cfg.api_key,
+                "source": "config.providers",
             })
 
-    # 2. Config top-level default if specified and not already in list
-    if cfg.llm.model and not any(m["name"] == "default" or m["model"] == cfg.llm.model for m in items):
+    # 3. Config default model if specified and not already in list
+    default_model = cfg.default or cfg.llm.model
+    if default_model and not any(m["name"] == "default" or m["model"] == default_model or m["name"] == default_model for m in items):
+        base_url = cfg.llm.base_url or settings.base_url or "Default endpoint"
         items.append({
             "name": "default",
-            "model": cfg.llm.model,
-            "base_url": cfg.llm.base_url or settings.base_url or "Default endpoint",
+            "model": default_model,
+            "base_url": base_url,
+            "provider": _provider_from_url(base_url),
             "api_key": cfg.llm.api_key,
-            "source": "config.llm",
+            "source": "config.default",
         })
 
-    # 3. Built-in Presets
+    # 4. Built-in Presets
     if not any(m["name"].lower() == "deepseek" for m in items):
         items.append({
             "name": "deepseek",
             "model": "deepseek-chat",
             "base_url": "https://api.deepseek.com/v1",
+            "provider": "deepseek",
             "api_key": cfg.llm.api_key,
             "source": "preset",
         })
@@ -144,6 +224,7 @@ def get_available_models() -> list[dict[str, Any]]:
             "name": "ollama",
             "model": "llama3.1",
             "base_url": "http://localhost:11434/v1",
+            "provider": "localhost",
             "api_key": "ollama",
             "source": "preset",
         })
@@ -152,11 +233,13 @@ def get_available_models() -> list[dict[str, Any]]:
             "name": "openai",
             "model": "gpt-4o-mini",
             "base_url": "api.openai.com",
+            "provider": "openai",
             "api_key": cfg.llm.api_key,
             "source": "preset",
         })
 
     return [item for item in items if _visible_model(item)]
+
 
 
 def select_model_menu(current_name: str | None = None) -> str:
@@ -174,10 +257,8 @@ def select_model_menu(current_name: str | None = None) -> str:
         padding=(0, 1),
     )
     table.add_column("#", justify="center", style="bold yellow", width=4)
-    table.add_column("Alias / Name", style="bold green", min_width=12)
-    table.add_column("Model Identifier", style="bright_white", min_width=18)
-    table.add_column("Endpoint", style="dim", min_width=24)
-    table.add_column("Source", style="cyan", min_width=12)
+    table.add_column("Provider", style="bold green", min_width=10, max_width=16, overflow="ellipsis")
+    table.add_column("Model", style="bright_white", min_width=18, max_width=50, overflow="ellipsis")
     table.add_column("Status", justify="center", width=10)
 
     default_idx = 1
@@ -193,10 +274,8 @@ def select_model_menu(current_name: str | None = None) -> str:
             status = ""
         table.add_row(
             str(idx),
-            m["name"],
+            m.get("provider") or m["name"],
             m["model"],
-            m["base_url"],
-            m["source"],
             status,
         )
 
@@ -247,18 +326,7 @@ def select_model_menu(current_name: str | None = None) -> str:
 
 def _switch_agent_model(agent: ReActAgent, model_name: str) -> None:
     """Recreate and assign a new LLM instance to the agent."""
-    cfg = load_config()
-    llm_cfg = cfg.llm
-    kwargs: dict[str, Any] = {
-        "temperature": llm_cfg.temperature,
-        "max_tokens": llm_cfg.max_tokens,
-    }
-    if llm_cfg.api_key:
-        kwargs["api_key"] = llm_cfg.api_key
-    if llm_cfg.base_url:
-        kwargs["base_url"] = llm_cfg.base_url
-
-    new_llm = create_llm(model_name, **kwargs)
+    new_llm = create_llm(model_name)
     agent.llm = new_llm
     set_last_model(new_llm.model)
     console.print()
@@ -278,27 +346,18 @@ def _switch_agent_model(agent: ReActAgent, model_name: str) -> None:
 def _build_agent(args: argparse.Namespace) -> ReActAgent:
     """Create an agent instance with default tools and merged config + CLI args."""
     cfg = load_config()
-    llm_cfg = cfg.llm
 
     # Model selection resolution
     if args.select:
-        name_or_model = select_model_menu(current_name=args.model or llm_cfg.model)
+        name_or_model = select_model_menu(current_name=args.model or cfg.default or cfg.llm.model)
     else:
-        name_or_model = args.model or get_last_model() or llm_cfg.model
+        name_or_model = args.model or get_last_model() or cfg.default or cfg.llm.model
 
-    kwargs: dict[str, Any] = {
-        "temperature": llm_cfg.temperature,
-        "max_tokens": llm_cfg.max_tokens,
-    }
-    if llm_cfg.api_key:
-        kwargs["api_key"] = llm_cfg.api_key
-    if llm_cfg.base_url:
-        kwargs["base_url"] = llm_cfg.base_url
-
-    llm = create_llm(name_or_model, **kwargs)
+    llm = create_llm(name_or_model)
     if args.model or args.select:
         set_last_model(llm.model)
     system_msg = args.sys_msg or DEFAULT_SYSTEM_MSG
+
 
     tools = []
     if not args.no_tools:
