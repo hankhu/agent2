@@ -1,2 +1,13 @@
 src/**/__pycache__/
 src/**/*.pyc
+
+# Local configuration / secrets — never commit these
+config.json
+agent2_config.json
+cherrystudio_llm_config.json
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx

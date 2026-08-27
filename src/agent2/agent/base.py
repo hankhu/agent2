@@ -126,6 +126,188 @@ class BaseAgent(ABC):
         new_agent._messages = [m.model_copy(deep=True) for m in self._messages]
         return new_agent
 
+    # ── Serialization & Persistence ─────────────────────────────────
+
+    def _get_extra_state(self) -> dict[str, Any]:
+        """Hook for subclasses to persist additional state."""
+        return {}
+
+    def _load_extra_state(self, extra: dict[str, Any]) -> None:
+        """Hook for subclasses to restore additional state."""
+        pass
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the agent state to a dictionary.
+
+        Returns
+        -------
+        dict[str, Any]
+            Serialized agent data including message history.
+        """
+        return {
+            "agent_type": self.__class__.__name__,
+            "name": self.name,
+            "system_prompt": self.system_prompt,
+            "max_iterations": self.max_iterations,
+            "verbose": self.verbose,
+            "messages": [m.model_dump(exclude_none=True) for m in self._messages],
+            "tools": [t.name for t in self.tool_registry.list_tools()],
+            "extra": self._get_extra_state(),
+        }
+
+    def to_json(self, indent: int = 2) -> str:
+        """Serialize the agent state to a JSON-formatted string."""
+        import json
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)
+
+    def save(self, path_or_fp: str | Path | TextIO) -> None:
+        """Save the serialized agent state to a file or stream.
+
+        Parameters
+        ----------
+        path_or_fp : str | Path | TextIO
+            File path string, pathlib.Path, or open text file object.
+        """
+        import json
+        from pathlib import Path
+
+        data = self.to_dict()
+        if isinstance(path_or_fp, (str, Path)):
+            p = Path(path_or_fp)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        else:
+            json.dump(data, path_or_fp, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def _resolve_agent_class(cls, agent_type: str | None) -> type[BaseAgent]:
+        """Resolve agent subclass by type name."""
+        if cls is not BaseAgent:
+            return cls
+        if agent_type == "PlannerAgent":
+            from agent2.agent.planner import PlannerAgent
+            return PlannerAgent
+        from agent2.agent.react import ReActAgent
+        return ReActAgent
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        llm: BaseLLM | None = None,
+        tools: list[Tool] | None = None,
+        **kwargs: Any,
+    ) -> BaseAgent:
+        """Restore an agent instance from a dictionary.
+
+        Parameters
+        ----------
+        data : dict[str, Any]
+            Serialized agent data dictionary.
+        llm : BaseLLM | None
+            Optional LLM instance. If not provided, a default LLM is created.
+        tools : list[Tool] | None
+            Optional list of Tool instances to bind to the restored agent.
+        **kwargs
+            Additional arguments passed to the agent constructor.
+
+        Returns
+        -------
+        BaseAgent
+            Restored agent instance with conversation history loaded.
+        """
+        agent_cls = cls._resolve_agent_class(data.get("agent_type"))
+        name = kwargs.pop("name", data.get("name", "agent"))
+        system_prompt = kwargs.pop("system_prompt", data.get("system_prompt", "You are a helpful AI assistant."))
+        max_iterations = kwargs.pop("max_iterations", data.get("max_iterations"))
+        verbose = kwargs.pop("verbose", data.get("verbose"))
+
+        resolved_tools: list[Tool] = []
+        if tools:
+            resolved_tools.extend(tools)
+        else:
+            tool_names = set(data.get("tools", []))
+            if tool_names:
+                try:
+                    import agent2.tools.builtin as builtin_module
+                    for attr_name in dir(builtin_module):
+                        val = getattr(builtin_module, attr_name)
+                        if isinstance(val, Tool) and val.name in tool_names:
+                            resolved_tools.append(val)
+                except Exception:
+                    pass
+
+        agent = agent_cls(
+            name=name,
+            llm=llm,
+            system_prompt=system_prompt,
+            tools=resolved_tools if resolved_tools else None,
+            max_iterations=max_iterations,
+            verbose=verbose,
+            **kwargs,
+        )
+
+        extra = data.get("extra", {})
+        if extra and hasattr(agent, "_load_extra_state"):
+            agent._load_extra_state(extra)
+
+        messages_raw = data.get("messages", [])
+        agent._messages = [Message.model_validate(m) for m in messages_raw]
+        return agent
+
+    @classmethod
+    def from_json(
+        cls,
+        json_str: str,
+        *,
+        llm: BaseLLM | None = None,
+        tools: list[Tool] | None = None,
+        **kwargs: Any,
+    ) -> BaseAgent:
+        """Restore an agent from a JSON string."""
+        import json
+        data = json.loads(json_str)
+        return cls.from_dict(data, llm=llm, tools=tools, **kwargs)
+
+    @classmethod
+    def load(
+        cls,
+        path_or_fp: str | Path | TextIO,
+        *,
+        llm: BaseLLM | None = None,
+        tools: list[Tool] | None = None,
+        **kwargs: Any,
+    ) -> BaseAgent:
+        """Load an agent from a JSON file or file-like object.
+
+        Parameters
+        ----------
+        path_or_fp : str | Path | TextIO
+            File path string, pathlib.Path, or open text file object.
+        llm : BaseLLM | None
+            Optional LLM instance.
+        tools : list[Tool] | None
+            Optional list of Tool instances.
+        **kwargs
+            Additional arguments passed to the agent constructor.
+
+        Returns
+        -------
+        BaseAgent
+            Restored agent instance with full conversation history.
+        """
+        import json
+        from pathlib import Path
+
+        if isinstance(path_or_fp, (str, Path)):
+            with open(path_or_fp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = json.load(path_or_fp)
+        return cls.from_dict(data, llm=llm, tools=tools, **kwargs)
+
     # ── Public API ──────────────────────────────────────────────────
 
     async def chat(self, msg: str | Message) -> str:
@@ -164,7 +346,7 @@ class BaseAgent(ABC):
         if not self._messages or self._messages[-1].role != Role.ASSISTANT or self._messages[-1].content != result:
             self._messages.append(Message.assistant(result))
 
-        self.log.finish(result)
+        self.log.finish()
         return result
 
     async def run(self, task: str) -> str:

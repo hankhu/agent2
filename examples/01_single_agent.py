@@ -6,7 +6,7 @@ Demonstrates:
 - Running a task and observing the Thought/Action/Observation loop
 
 Usage:
-    export AGENT2_OPENAI_API_KEY=sk-...
+    export AGENT2_API_KEY=sk-...
     uv run examples/01_single_agent.py
 """
 

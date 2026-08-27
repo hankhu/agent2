@@ -1,0 +1,84 @@
+"""Session persistence for TUI conversations."""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Any
+
+
+SESSION_DIR = Path.home() / ".local" / "share" / "agent2" / "sessions"
+
+
+class SessionManager:
+    """Manage saving, loading, and listing of agent sessions."""
+
+    def __init__(self, session_dir: Path = SESSION_DIR) -> None:
+        self.session_dir = session_dir
+        try:
+            self.session_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+    def save(
+        self,
+        session_id: str,
+        agent_data: dict[str, Any],
+        title: str = "",
+    ) -> Path:
+        """Persist agent state to a JSON session file."""
+        path = self.session_dir / f"{session_id}.json"
+        payload = {
+            "id": session_id,
+            "title": title or _extract_title(agent_data),
+            "saved_at": time.time(),
+            "agent": agent_data,
+        }
+        try:
+            path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            # Auto-save is best-effort; never block the TUI because the
+            # session directory is not writable.
+            pass
+        return path
+
+    def load(self, session_id: str) -> dict[str, Any]:
+        """Load a session by its ID.  Raises ``FileNotFoundError``."""
+        path = self.session_dir / f"{session_id}.json"
+        if not path.exists():
+            raise FileNotFoundError(f"Session '{session_id}' not found")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def list_sessions(self) -> list[dict[str, Any]]:
+        """Return metadata of all saved sessions, newest first."""
+        sessions: list[dict[str, Any]] = []
+        for f in self.session_dir.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                sessions.append({
+                    "id": data.get("id", f.stem),
+                    "title": data.get("title", ""),
+                    "saved_at": data.get("saved_at", 0),
+                })
+            except (json.JSONDecodeError, KeyError):
+                continue
+        sessions.sort(key=lambda s: s["saved_at"], reverse=True)
+        return sessions
+
+    def delete(self, session_id: str) -> None:
+        """Delete a session file."""
+        path = self.session_dir / f"{session_id}.json"
+        path.unlink(missing_ok=True)
+
+
+def _extract_title(agent_data: dict[str, Any]) -> str:
+    """Try to derive a short title from the first user message."""
+    for msg in agent_data.get("messages", []):
+        if msg.get("role") == "user" and msg.get("content"):
+            text = msg["content"]
+            return text[:60] + ("…" if len(text) > 60 else "")
+    return ""

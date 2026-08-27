@@ -164,7 +164,7 @@ class LongTermMemory(BaseMemory):
             ) from e
 
         from agent2.utils.config import settings
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        client = AsyncOpenAI(api_key=settings.api_key)
         response = await client.embeddings.create(
             input=text,
             model="text-embedding-3-small",

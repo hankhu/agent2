@@ -21,7 +21,7 @@
 uv pip install -e "."
 
 # 设置 API Key
-export AGENT2_OPENAI_API_KEY=sk-...
+export AGENT2_API_KEY=sk-...
 ```
 
 ### 最简示例

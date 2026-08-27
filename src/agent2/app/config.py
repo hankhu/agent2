@@ -87,6 +87,27 @@ class AppConfig(BaseModel):
 
 CONFIG_DIR = Path.home() / ".config" / "agent2"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+LAST_MODEL_FILE = CONFIG_DIR / "last_model"
+
+
+def get_last_model() -> str | None:
+    """Return the last model selected by the user, if any."""
+    try:
+        if LAST_MODEL_FILE.exists():
+            value = LAST_MODEL_FILE.read_text(encoding="utf-8").strip()
+            return value or None
+    except OSError:
+        pass
+    return None
+
+
+def set_last_model(model: str) -> None:
+    """Persist the last model selected by the user."""
+    try:
+        LAST_MODEL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LAST_MODEL_FILE.write_text(model.strip(), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def load_config() -> AppConfig:

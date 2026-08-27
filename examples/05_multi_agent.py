@@ -6,7 +6,7 @@ Demonstrates:
 - DebateCrew: agents debate and reach consensus
 
 Usage:
-    export AGENT2_OPENAI_API_KEY=sk-...
+    export AGENT2_API_KEY=sk-...
     uv run examples/05_multi_agent.py
 """
 

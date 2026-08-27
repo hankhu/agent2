@@ -8,8 +8,8 @@ from pathlib import Path
 from agent2.tools.base import tool
 
 
-@tool(description="Read the contents of a file at the given path.")
-def read_file(path: str) -> str:
+@tool(name="file_read", description="Read the contents of a file at the given path.")
+def file_read(path: str) -> str:
     """Read a text file and return its contents."""
     p = Path(path).expanduser().resolve()
     if not p.exists():
@@ -25,8 +25,8 @@ def read_file(path: str) -> str:
         return f"Error reading file: {e}"
 
 
-@tool(description="Write content to a file at the given path. Creates parent directories if needed.")
-def write_file(path: str, content: str) -> str:
+@tool(name="file_write", description="Write content to a file at the given path. Creates parent directories if needed.")
+def file_write(path: str, content: str) -> str:
     """Write text content to a file."""
     p = Path(path).expanduser().resolve()
     try:
@@ -35,6 +35,11 @@ def write_file(path: str, content: str) -> str:
         return f"Successfully wrote {len(content)} chars to {p}"
     except Exception as e:
         return f"Error writing file: {e}"
+
+
+# Aliases for backwards compatibility
+read_file = file_read
+write_file = file_write
 
 
 @tool(description="List files and directories at the given path.")

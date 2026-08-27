@@ -24,7 +24,7 @@ class OpenAILLM(BaseLLM):
     model : str
         Model name, e.g. ``"gpt-4o-mini"``, ``"deepseek-chat"``.
     api_key : str | None
-        API key. Falls back to ``AGENT2_OPENAI_API_KEY`` or ``OPENAI_API_KEY``.
+        API key. Falls back to ``AGENT2_API_KEY``.
     base_url : str | None
         Custom base URL (for DeepSeek, Ollama, vLLM, proxies, etc.).
     """
@@ -57,16 +57,20 @@ class OpenAILLM(BaseLLM):
             api_key = self._api_key
             if api_key is None:
                 from agent2.utils.config import settings
-                api_key = settings.openai_api_key
+                api_key = settings.api_key
             if api_key:
                 kwargs["api_key"] = api_key
 
-            if self._base_url:
-                kwargs["base_url"] = self._base_url
-            else:
+            base_url = self._base_url
+            if not base_url:
                 from agent2.utils.config import settings as s
-                if s.openai_base_url:
-                    kwargs["base_url"] = s.openai_base_url
+                base_url = s.base_url
+
+            if base_url:
+                base_url = base_url.strip()
+                if not any(v in base_url for v in ("/v1", "/v2", "/v3", "/v4")) and not base_url.endswith("/openai"):
+                    base_url = base_url.rstrip("/") + "/v1"
+                kwargs["base_url"] = base_url
 
             self._client = AsyncOpenAI(**kwargs)
         return self._client

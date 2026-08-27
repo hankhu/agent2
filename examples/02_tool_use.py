@@ -6,7 +6,7 @@ Demonstrates:
 - Agent using tools to solve problems
 
 Usage:
-    export AGENT2_OPENAI_API_KEY=sk-...
+    export AGENT2_API_KEY=sk-...
     uv run examples/02_tool_use.py
 """
 

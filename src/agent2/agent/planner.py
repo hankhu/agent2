@@ -98,6 +98,18 @@ class PlannerAgent(BaseAgent):
         self.enable_replan = enable_replan
         self.max_step_iterations = max_step_iterations
 
+    def _get_extra_state(self) -> dict[str, Any]:
+        return {
+            "enable_replan": self.enable_replan,
+            "max_step_iterations": self.max_step_iterations,
+        }
+
+    def _load_extra_state(self, extra: dict[str, Any]) -> None:
+        if "enable_replan" in extra:
+            self.enable_replan = extra["enable_replan"]
+        if "max_step_iterations" in extra:
+            self.max_step_iterations = extra["max_step_iterations"]
+
     async def _run_loop(self) -> str:
         """Plan → Execute each step → Synthesise."""
         task = self._messages[-1].content or ""

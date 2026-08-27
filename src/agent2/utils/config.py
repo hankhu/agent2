@@ -34,8 +34,8 @@ class Settings(BaseSettings):
     )
 
     # ── API Keys & Endpoints ─────────────────────────────────────────
-    openai_api_key: str | None = Field(default=None)
-    openai_base_url: str | None = Field(default=None)
+    api_key: str | None = Field(default=None, description="Default API key")
+    base_url: str | None = Field(default=None, description="Default base URL")
 
     # ── Agent Defaults ──────────────────────────────────────────────
     agent_max_iterations: int = Field(
