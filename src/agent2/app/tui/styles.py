@@ -202,4 +202,13 @@ SessionSelectScreen DataTable {
     margin: 1 0;
 }
 
+SessionSelectScreen #rename-input {
+    margin: 1 0 0 0;
+}
+
+SessionSelectScreen #session-hint {
+    margin: 1 0 0 0;
+}
+
+
 """

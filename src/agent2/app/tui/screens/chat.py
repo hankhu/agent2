@@ -33,12 +33,15 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/clear", "Clear display"),
     ("/new", "Start new session"),
     ("/resume", "Resume saved session"),
+    ("/sessions", "List & manage sessions (resume/rename/delete)"),
+    ("/session", "Alias for /sessions"),
     ("/rename", "Rename current session"),
     ("/help", "Show help"),
     ("/h", "Alias for /help"),
     ("/exit", "Exit application"),
     ("/quit", "Alias for /exit"),
 ]
+
 
 
 
@@ -291,7 +294,7 @@ class ChatScreen(Screen):
             messages.clear_messages()
             messages.add_system_message("✨ New session started.")
 
-        elif cmd == "/resume":
+        elif cmd in ("/resume", "/sessions", "/session"):
             self._handle_resume(arg)
 
         elif cmd == "/rename":
@@ -315,6 +318,7 @@ class ChatScreen(Screen):
                 "  /model [name]   Switch model\n"
                 "  /clear          Clear display\n"
                 "  /new            New session\n"
+                "  /sessions       List & manage sessions (resume/rename/delete)\n"
                 "  /resume [id]    Resume session\n"
                 "  /rename <title> Rename current session\n"
                 "  /help           This help\n"
@@ -375,7 +379,11 @@ class ChatScreen(Screen):
                 f"🔄 Session {session_id[:8]} restored."
             )
 
-        self.app.push_screen(SessionSelectScreen(sessions), callback=on_session)
+        self.app.push_screen(
+            SessionSelectScreen(sessions, session_manager=app.session_manager),
+            callback=on_session,
+        )
+
 
     def _rebuild_messages(self) -> None:
         """Re-populate the message list from the agent's history."""

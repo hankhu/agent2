@@ -363,8 +363,9 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 
 ### 6.7 TUI 交互式模态选择器 (`SessionSelectScreen` / `ModelSelectScreen`)
 
-- **SessionSelectScreen**：模态弹窗表格展示所有已存会话（序号、标题、ID 前缀、保存时间），按 Enter 直接恢复，按 Esc 取消。
+- **SessionSelectScreen**：模态弹窗表格展示所有已存会话（序号、标题、ID 前缀、保存时间）。支持 `Enter` 恢复会话、`e`/`r` 就地编辑会话标题、`d` 快捷删除会话，以及 `Esc` 退出管理。
 - **ModelSelectScreen 动态过滤**：挂载搜索框并监听 `Input.Changed` 事件，用户键入关键词时实时重建表格数据源，支持按序号或模型名称快速回车选择。
+
 
 ### 6.8 无冗余配置架构与服务商继承 (`AppConfig.resolve_model`)
 
