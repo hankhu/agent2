@@ -1,6 +1,6 @@
 [project]
 name = "agent2"
-version = "0.1.1"
+version = "0.1.1b"
 description = "A modular agent system framework for learning and research"
 readme = "README.md"
 requires-python = ">=3.13"
