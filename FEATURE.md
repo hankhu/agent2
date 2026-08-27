@@ -127,9 +127,11 @@
 
 - 基于 Textual 的终端图形化聊天应用：
   - **会话选择模态框 (`SessionSelectScreen`)** — `/resume` 命令弹出交互表格，直观查看会话序号、标题、ID 与保存时间并一键恢复。
+  - **会话重命名 (`/rename`)** — `/rename <new-title>` 快速修改当前会话名称并持久化保存。
   - **动态模型搜索 (`ModelSelectScreen`)** — 支持键入实时模糊过滤 Provider、Model 和 Alias，回车即选。
   - **输入历史导航 (`ChatInput`)** — 方向键 ↑ / ↓ 快速浏览和填充历史用户输入，保留草稿编辑状态。
   - **会话标题智能清洗** — 自动剔除 `<file>`、`<directory>` 等注入的上下文标签，保持会话列表标题整洁。
+
 
 ## 8. 示例 (`examples/`)
 

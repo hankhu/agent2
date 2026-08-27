@@ -33,11 +33,13 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/clear", "Clear display"),
     ("/new", "Start new session"),
     ("/resume", "Resume saved session"),
+    ("/rename", "Rename current session"),
     ("/help", "Show help"),
     ("/h", "Alias for /help"),
     ("/exit", "Exit application"),
     ("/quit", "Alias for /exit"),
 ]
+
 
 
 # ── TUI-logger events (posted by TUILogger → handled here) ─────
@@ -292,6 +294,21 @@ class ChatScreen(Screen):
         elif cmd == "/resume":
             self._handle_resume(arg)
 
+        elif cmd == "/rename":
+            if not arg:
+                curr = f" (current: [bold]{app.session_title}[/bold])" if app.session_title else ""
+                messages.add_system_message(f"Usage: /rename <new-title>{curr}")
+                return
+            app.session_title = arg.strip()
+            app.session_manager.save(
+                app.session_id,
+                app.agent.to_dict(),
+                title=app.session_title,
+            )
+            messages.add_system_message(
+                f"✏️ Session renamed to: [bold cyan]{app.session_title}[/bold cyan]"
+            )
+
         elif cmd in ("/help", "/h"):
             messages.add_system_message(
                 "[bold cyan]Commands[/bold cyan]\n"
@@ -299,6 +316,7 @@ class ChatScreen(Screen):
                 "  /clear          Clear display\n"
                 "  /new            New session\n"
                 "  /resume [id]    Resume session\n"
+                "  /rename <title> Rename current session\n"
                 "  /help           This help\n"
                 "  /exit           Quit\n"
                 "\n[bold cyan]Context Injection[/bold cyan]\n"
@@ -307,7 +325,11 @@ class ChatScreen(Screen):
             )
 
         elif cmd in ("/exit", "/quit"):
-            app.session_manager.save(app.session_id, app.agent.to_dict())
+            app.session_manager.save(
+                app.session_id,
+                app.agent.to_dict(),
+                title=app.session_title or "",
+            )
             self.app.exit()
 
         else:
@@ -377,8 +399,13 @@ class ChatScreen(Screen):
     def action_quit_app(self) -> None:
         """Ctrl+D: save session and exit."""
         app: Agent2App = self.app  # type: ignore[assignment]
-        app.session_manager.save(app.session_id, app.agent.to_dict())
+        app.session_manager.save(
+            app.session_id,
+            app.agent.to_dict(),
+            title=app.session_title or "",
+        )
         self.app.exit()
+
 
     # ── Helpers ─────────────────────────────────────────────────
 

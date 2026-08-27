@@ -134,6 +134,7 @@ class Agent2App(App):  # type: ignore[type-arg]
         self.agent = agent
         self.session_manager = session_manager or SessionManager()
         self.session_id = uuid.uuid4().hex[:8]
+        self.session_title: str | None = None
         self.initial_message = initial_message
 
     def on_mount(self) -> None:
@@ -147,6 +148,7 @@ class Agent2App(App):  # type: ignore[type-arg]
 
     def new_session_id(self) -> None:
         self.session_id = uuid.uuid4().hex[:8]
+        self.session_title = None
 
     def load_session(self, session_id: str) -> None:
         data = self.session_manager.load(session_id)
@@ -159,7 +161,9 @@ class Agent2App(App):  # type: ignore[type-arg]
         self.agent._messages = restored._messages  # noqa: SLF001
         self.agent.system_prompt = restored.system_prompt
         self.session_id = session_id
+        self.session_title = data.get("title")
         set_last_model(self.agent.llm.model)
+
 
 
 # ── Builder (mirrors chat.py's _build_agent) ────────────────────

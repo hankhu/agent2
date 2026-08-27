@@ -378,7 +378,19 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 - 将服务商基础设施（`providers`）与具体模型（`models`）解耦，彻底消除在每个模型中重复配置 `base_url` 与 `api_key` 的冗余。
 - 在 `AppConfig._normalize_legacy_config` 中内置向后兼容转换，支持平滑迁移旧版 `llm` 配置。
 
+### 6.9 会话重命名与标题保留机制 (`SessionManager.rename` / `/rename`)
+
+```python
+# session.py
+# 1. /rename <title> 显式更新当前 app.session_title 并实时回写磁盘
+# 2. SessionManager.save() 优先保留已重命名的标题，防止后续自动保存回退覆盖
+```
+
+- 允许用户在 TUI 界面随时通过 `/rename <new-title>` 为会话指定语义化标题。
+- `SessionManager.save()` 在保存时若未显式传入新标题，会优先保留磁盘既有标题，确保重命名在后续多轮对话自动持久化时不被覆盖。
+
 ---
+
 
 
 ## 7. 异步设计

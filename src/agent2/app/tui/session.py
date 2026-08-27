@@ -30,9 +30,17 @@ class SessionManager:
     ) -> Path:
         """Persist agent state to a JSON session file."""
         path = self.session_dir / f"{session_id}.json"
+        existing_title = ""
+        if not title and path.exists():
+            try:
+                old = json.loads(path.read_text(encoding="utf-8"))
+                existing_title = old.get("title", "")
+            except Exception:
+                pass
+        final_title = title.strip() or existing_title or _extract_title(agent_data)
         payload = {
             "id": session_id,
-            "title": title or _extract_title(agent_data),
+            "title": final_title,
             "saved_at": time.time(),
             "agent": agent_data,
         }
@@ -47,7 +55,20 @@ class SessionManager:
             pass
         return path
 
+    def rename(self, session_id: str, new_title: str) -> None:
+        """Rename a session title."""
+        path = self.session_dir / f"{session_id}.json"
+        if not path.exists():
+            raise FileNotFoundError(f"Session '{session_id}' not found")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["title"] = new_title.strip()
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
     def load(self, session_id: str) -> dict[str, Any]:
+
         """Load a session by its ID.  Raises ``FileNotFoundError``."""
         path = self.session_dir / f"{session_id}.json"
         if not path.exists():
