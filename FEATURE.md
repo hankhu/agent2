@@ -126,6 +126,7 @@
 ### 7.3 TUI 界面 (`agent2.app.tui`)
 
 - 基于 Textual 的终端图形化聊天应用：
+  - **全扁平极简 UI 风格 (Flat Design)** — 彻底移除冗重圆角与粗框，全屏采用现代扁平单线描边、微妙色块底色与微指示边条（Indicator Bar），布局紧凑优雅。
   - **会话管理模态框 (`SessionSelectScreen` / `/sessions`)** — `/sessions`（或 `/resume`）弹出交互式会话管理面板：
     - `Enter`: 一键恢复选中的历史会话。
     - `e` / `r`: 就地重命名选中会话标题并持久化。
@@ -135,6 +136,7 @@
   - **动态模型搜索 (`ModelSelectScreen`)** — 支持键入实时模糊过滤 Provider、Model 和 Alias，回车即选。
   - **输入历史导航 (`ChatInput`)** — 方向键 ↑ / ↓ 快速浏览和填充历史用户输入，保留草稿编辑状态。
   - **会话标题智能清洗** — 自动剔除 `<file>`、`<directory>` 等注入的上下文标签，保持会话列表标题整洁。
+
 
 
 

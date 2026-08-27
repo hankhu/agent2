@@ -1,8 +1,9 @@
-"""Textual CSS styles for the Agent2 TUI."""
+"""Textual CSS styles for the Agent2 TUI — modern flat minimalist design."""
 
 APP_CSS = """
 Screen {
     background: $surface;
+    color: $text;
 }
 
 /* ── Status Bar ─────────────────────────────────────────────── */
@@ -10,10 +11,11 @@ Screen {
 StatusBar {
     dock: top;
     height: 1;
-    background: $primary-background;
-    color: $text;
+    background: $panel;
+    color: $text-muted;
     padding: 0 1;
     content-align-horizontal: left;
+    border-bottom: solid $panel-lighten-1 25%;
 }
 
 /* ── Message List ───────────────────────────────────────────── */
@@ -21,20 +23,21 @@ StatusBar {
 #messages {
     height: 1fr;
     overflow-y: auto;
-    padding: 0 1;
+    padding: 1 1;
 }
 
 UserMessage {
     margin: 1 0 0 0;
-    padding: 0 1;
-    background: $primary 15%;
-    border-left: thick $primary;
+    padding: 1 1;
+    background: $panel 35%;
+    border-left: solid $primary;
     height: auto;
 }
 
 AssistantMessage {
     margin: 1 0 0 0;
-    padding: 0 1;
+    padding: 1 1;
+    background: transparent;
     height: auto;
 }
 
@@ -48,38 +51,46 @@ SystemMessage {
 /* ── Thinking Block ─────────────────────────────────────────── */
 
 ThinkingBlock {
-    margin: 0 0 0 2;
+    margin: 1 0 0 1;
+    padding: 0 1;
+    background: $panel 25%;
+    border-left: solid $secondary 60%;
     height: auto;
 }
 
 ThinkingBlock > Contents {
     height: auto;
+    padding: 0;
 }
 
 /* ── Tool Card ──────────────────────────────────────────────── */
 
 ToolCard {
-    margin: 0 0 0 2;
+    margin: 1 0 0 1;
     padding: 0 1;
-    border: round $warning;
+    background: $panel 30%;
+    border-left: solid $warning;
     height: auto;
 }
 
 ToolCard .tool-result {
     height: auto;
     margin: 0;
+    border: none;
 }
 
 ToolCard .tool-result > Contents {
     height: auto;
+    padding: 0;
 }
 
 /* ── Diff View ──────────────────────────────────────────────── */
 
 DiffView {
-    margin: 0 0 0 2;
-    padding: 1;
-    border: round $accent;
+    margin: 1 0 0 1;
+    padding: 0 1;
+    background: $panel 35%;
+    border-left: solid $accent;
     height: auto;
 }
 
@@ -89,15 +100,18 @@ DiffView {
     dock: bottom;
     height: auto;
     max-height: 14;
+    background: $surface;
+    border-top: solid $panel-lighten-1 35%;
+    padding: 0 0 1 0;
 }
 
 #completion-list {
     display: none;
     height: auto;
     max-height: 8;
-    margin: 0 1;
-    border: round $primary;
-    background: $surface;
+    margin: 0 1 1 1;
+    border: solid $primary 50%;
+    background: $panel;
 }
 
 #completion-list.visible {
@@ -109,12 +123,14 @@ DiffView {
     min-height: 3;
     max-height: 12;
     margin: 0 1;
-    border: round $primary;
+    border: solid $panel-lighten-1 50%;
+    background: $surface-darken-1;
 }
 
 #chat-input:focus {
-    border: round $accent;
+    border: solid $primary;
 }
+
 
 #input-hint {
     height: 1;
@@ -127,17 +143,17 @@ DiffView {
 
 ConfirmModal {
     align: center bottom;
-    background: transparent;
+    background: $background 60%;
 }
 
 ConfirmModal #confirm-dialog {
     width: 100%;
     height: auto;
     max-height: 80%;
-    border: none;
+    border-top: solid $warning;
     background: $panel;
     padding: 1 2;
-    margin-bottom: 4;
+    margin-bottom: 0;
 }
 
 ConfirmModal #confirm-dialog DiffView {
@@ -154,20 +170,22 @@ ConfirmModal #confirm-buttons {
 
 ConfirmModal #confirm-buttons Button {
     margin: 0 1;
+    border: none;
 }
 
 /* ── Model Select ───────────────────────────────────────────── */
 
 ModelSelectScreen {
     align: center middle;
+    background: $background 60%;
 }
 
 ModelSelectScreen #model-dialog {
-    width: 84;
+    width: 86;
     height: auto;
-    max-height: 80%;
-    border: thick $primary;
-    background: $surface;
+    max-height: 85%;
+    border: solid $primary;
+    background: $panel;
     padding: 1 2;
 }
 
@@ -175,24 +193,31 @@ ModelSelectScreen DataTable {
     height: auto;
     max-height: 16;
     margin: 1 0;
+    border: none;
 }
 
 ModelSelectScreen #model-input {
     margin: 1 0 0 0;
+    border: solid $primary 50%;
+}
+
+ModelSelectScreen #model-input:focus {
+    border: solid $primary;
 }
 
 /* ── Session Select ─────────────────────────────────────────── */
 
 SessionSelectScreen {
     align: center middle;
+    background: $background 60%;
 }
 
 SessionSelectScreen #session-dialog {
     width: 96;
     height: auto;
-    max-height: 80%;
-    border: thick $primary;
-    background: $surface;
+    max-height: 85%;
+    border: solid $primary;
+    background: $panel;
     padding: 1 2;
 }
 
@@ -200,15 +225,21 @@ SessionSelectScreen DataTable {
     height: auto;
     max-height: 20;
     margin: 1 0;
+    border: none;
 }
 
 SessionSelectScreen #rename-input {
     margin: 1 0 0 0;
+    border: solid $primary 50%;
+}
+
+SessionSelectScreen #rename-input:focus {
+    border: solid $primary;
 }
 
 SessionSelectScreen #session-hint {
     margin: 1 0 0 0;
+    color: $text-muted;
 }
-
-
 """
+

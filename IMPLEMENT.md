@@ -390,7 +390,16 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 - 允许用户在 TUI 界面随时通过 `/rename <new-title>` 为会话指定语义化标题。
 - `SessionManager.save()` 在保存时若未显式传入新标题，会优先保留磁盘既有标题，确保重命名在后续多轮对话自动持久化时不被覆盖。
 
+### 6.10 TUI 扁平化视觉体系 (`styles.py`)
+
+- **结构去厚重**：将全量 `border: round` 与 `border: thick` 移除，代之以细致的单线边框（`solid`）、微妙背景灰阶层级（`$panel` / `$surface-darken-1`）与彩色左指示条（`border-left: solid`）。
+- **组件扁平化**：
+  - `UserMessage` / `AssistantMessage`: 采用轻量底色与单侧状态指示条，去除厚重气泡边框。
+  - `ToolCard` / `DiffView`: 扁平卡片背景与左侧警戒/重点边条，紧凑美观。
+  - 模态面板 (`ModelSelectScreen` / `SessionSelectScreen` / `ConfirmModal`): 统一扁平化边框与无外边距紧凑布局。
+
 ---
+
 
 
 
