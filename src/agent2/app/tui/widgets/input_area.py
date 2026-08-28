@@ -49,6 +49,12 @@ class ChatInput(TextArea):
         self._history: list[str] = []
         self._history_index: int | None = None
         self._draft = ""
+        self._completion_navigated = False
+
+    def watch_show_completion(self, visible: bool) -> None:
+        """Reset the navigation latch when the completion list closes."""
+        if not visible:
+            self._completion_navigated = False
 
     # Override internal key handler so we intercept *before* TextArea acts.
     async def _on_key(self, event: events.Key) -> None:
@@ -63,7 +69,21 @@ class ChatInput(TextArea):
 
         # ── Completion navigation ───────────────────────────────
         if self.show_completion and event.key in ("tab", "up", "down", "escape"):
+            if event.key in ("up", "down"):
+                # Remember that the user actively picked an item: Enter will
+                # then accept the highlighted command instead of submitting.
+                self._completion_navigated = True
             self.post_message(self.CompletionKey(event.key))
+            event.prevent_default()
+            event.stop()
+            return
+
+        # Enter accepts the highlighted completion only after the user
+        # navigated the list; a plain Enter on a typed command line
+        # (e.g. "/help") still submits it.
+        if self.show_completion and event.key == "enter" and self._completion_navigated:
+            self._completion_navigated = False
+            self.post_message(self.CompletionKey("enter"))
             event.prevent_default()
             event.stop()
             return

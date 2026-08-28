@@ -21,6 +21,7 @@ from agent2.utils.logging import AgentLogger
 
 from agent2.app.tui.screens.chat import (
     ChatScreen,
+    StatusText,
     ThoughtReceived,
     ToolCallCompleted,
     ToolCallStarted,
@@ -97,6 +98,7 @@ class TUILogger(AgentLogger):
 
     def action(self, tool_name: str, arguments: dict[str, Any] | None = None) -> None:
         self._screen.post_message(ToolCallStarted(tool_name, arguments or {}))
+        self._screen.post_message(StatusText(f"Running {tool_name}…"))
 
     def observation(self, content: str, *, is_error: bool = False) -> None:
         self._screen.post_message(ToolCallCompleted(content, is_error))

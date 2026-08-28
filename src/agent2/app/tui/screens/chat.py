@@ -16,7 +16,7 @@ from textual.screen import Screen
 from textual.widgets import OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
-from agent2.llm.message import Role
+from agent2.llm.message import Role, Usage
 from agent2.app.tui.widgets.input_area import ChatInput
 from agent2.app.tui.widgets.message_list import MessageList
 from agent2.app.tui.widgets.status_bar import StatusBar
@@ -69,6 +69,14 @@ class ToolCallCompleted(Message):
         self.is_error = is_error
 
 
+class StatusText(Message):
+    """Update the status bar's processing label (e.g. "Running shell_exec…")."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.text = text
+
+
 # ── ChatScreen ──────────────────────────────────────────────────
 
 
@@ -94,16 +102,17 @@ class ChatScreen(Screen):
     def on_mount(self) -> None:
         self.query_one("#chat-input", ChatInput).focus()
         app: Agent2App = self.app  # type: ignore[assignment]
-        self.query_one(StatusBar).model_name = app.agent.llm.model
         self._current_tool_card = None
         self._thought_start: float | None = None
+        self._run_generation = 0
+        self._sync_status_bar()
 
         # Auto-send initial message if provided via -i
         if app.initial_message:
             msg = app.initial_message
             app.initial_message = None  # consume
             self.query_one("#messages", MessageList).add_user_message(msg)
-            self._run_agent(_process_context(msg))
+            self._run_agent(msg)
 
     # ── Input handling ──────────────────────────────────────────
 
@@ -115,9 +124,10 @@ class ChatScreen(Screen):
             self._handle_command(text)
             return
 
-        processed = _process_context(text)
+        # Echo the user message into the chat window immediately, *before*
+        # any (potentially slow) context expansion or LLM request.
         self.query_one("#messages", MessageList).add_user_message(text)
-        self._run_agent(processed)
+        self._run_agent(text)
 
     # ── Completion ──────────────────────────────────────────────
 
@@ -140,7 +150,7 @@ class ChatScreen(Screen):
     def on_chat_input_completion_key(self, event: ChatInput.CompletionKey) -> None:
         """Handle navigation keys forwarded from ChatInput."""
         completion = self.query_one("#completion-list", OptionList)
-        if event.key == "tab":
+        if event.key in ("tab", "enter"):
             self._accept_completion()
         elif event.key == "down":
             h = completion.highlighted
@@ -197,25 +207,43 @@ class ChatScreen(Screen):
         app: Agent2App = self.app  # type: ignore[assignment]
         agent = app.agent
         messages = self.query_one("#messages", MessageList)
+        status = self.query_one(StatusBar)
 
         original_log = agent.log
         agent.log = TUILogger(agent.name, screen=self)
         agent.approval_callback = self._request_approval  # type: ignore[attr-defined]
         self._thought_start = time.monotonic()
 
+        # Generation counter: if this worker is cancelled by a newer run
+        # (exclusive worker), the stale finally-block must not clear the
+        # busy state that the newer run just set.
+        self._run_generation += 1
+        generation = self._run_generation
+
+        # Show "Processing…" in the status bar right away, until the
+        # response returns (or the request fails / is interrupted).
+        status.busy = True
+        status.status_text = "Processing…"
+
         try:
-            result = await agent.chat(text)
+            # Expand #file / #dir context inside the worker so slow disk
+            # reads don't delay the user message from appearing.
+            processed = await asyncio.to_thread(_process_context, text)
+            result = await agent.chat(processed)
             messages.add_assistant_message(result)
-            self._update_token_count()
+            self._sync_status_bar()
         except asyncio.CancelledError:
             messages.add_system_message("⛔ Interrupted by user.")
         except Exception as exc:
             messages.add_system_message(f"❌ Error: {exc}")
         finally:
             agent.log = original_log
+            if generation == self._run_generation:
+                status.busy = False
+                status.status_text = ""
 
-        # Auto-save
-        app.session_manager.save(app.session_id, agent.to_dict())
+        # Auto-save (skipped when the conversation has no input at all)
+        self._save_session()
 
     # ── HITL approval via Future ────────────────────────────────
 
@@ -254,6 +282,10 @@ class ChatScreen(Screen):
                 event.content, is_error=event.is_error,
             )
             self._current_tool_card = None
+        self.query_one(StatusBar).status_text = "Processing…"
+
+    def on_status_text(self, event: StatusText) -> None:
+        self.query_one(StatusBar).status_text = event.text
 
     # ── Slash commands ──────────────────────────────────────────
 
@@ -269,7 +301,7 @@ class ChatScreen(Screen):
         if cmd in ("/model", "/models"):
             if arg:
                 app.switch_model(arg)
-                self.query_one(StatusBar).model_name = app.agent.llm.model
+                self._sync_status_bar()
                 messages.add_system_message(
                     f"Model switched → {app.agent.llm.model}"
                 )
@@ -277,7 +309,7 @@ class ChatScreen(Screen):
                 def on_model(name: str) -> None:
                     if name:
                         app.switch_model(name)
-                        self.query_one(StatusBar).model_name = app.agent.llm.model
+                        self._sync_status_bar()
                         messages.add_system_message(
                             f"Model switched → {app.agent.llm.model}"
                         )
@@ -288,10 +320,13 @@ class ChatScreen(Screen):
             messages.add_system_message("🧹 Display cleared.")
 
         elif cmd == "/new":
-            app.session_manager.save(app.session_id, app.agent.to_dict())
+            self._save_session()
             app.agent.reset()
             app.new_session_id()
             messages.clear_messages()
+            self._reset_usage()
+            self.query_one(StatusBar).reset_timer()
+            self._sync_status_bar()
             messages.add_system_message("✨ New session started.")
 
         elif cmd in ("/resume", "/sessions", "/session"):
@@ -301,6 +336,9 @@ class ChatScreen(Screen):
             if not arg:
                 curr = f" (current: [bold]{app.session_title}[/bold])" if app.session_title else ""
                 messages.add_system_message(f"Usage: /rename <new-title>{curr}")
+                return
+            if not self._session_has_input():
+                messages.add_system_message("当前会话还没有内容，暂不保存，无法重命名。")
                 return
             app.session_title = arg.strip()
             app.session_manager.save(
@@ -329,11 +367,12 @@ class ChatScreen(Screen):
             )
 
         elif cmd in ("/exit", "/quit"):
-            app.session_manager.save(
-                app.session_id,
-                app.agent.to_dict(),
-                title=app.session_title or "",
-            )
+            if self._session_has_input():
+                app.session_manager.save(
+                    app.session_id,
+                    app.agent.to_dict(),
+                    title=app.session_title or "",
+                )
             self.app.exit()
 
         else:
@@ -354,7 +393,9 @@ class ChatScreen(Screen):
                 app.load_session(match["id"])
                 messages.clear_messages()
                 self._rebuild_messages()
-                self.query_one(StatusBar).model_name = app.agent.llm.model
+                self._reset_usage()
+                self.query_one(StatusBar).reset_timer()
+                self._sync_status_bar()
                 messages.add_system_message(
                     f"🔄 Session {match['id'][:8]} restored."
                 )
@@ -374,7 +415,9 @@ class ChatScreen(Screen):
             app.load_session(session_id)
             messages.clear_messages()
             self._rebuild_messages()
-            self.query_one(StatusBar).model_name = app.agent.llm.model
+            self._reset_usage()
+            self.query_one(StatusBar).reset_timer()
+            self._sync_status_bar()
             messages.add_system_message(
                 f"🔄 Session {session_id[:8]} restored."
             )
@@ -405,23 +448,70 @@ class ChatScreen(Screen):
                 return
 
     def action_quit_app(self) -> None:
-        """Ctrl+D: save session and exit."""
+        """Ctrl+D: save the session (unless empty) and exit."""
         app: Agent2App = self.app  # type: ignore[assignment]
-        app.session_manager.save(
-            app.session_id,
-            app.agent.to_dict(),
-            title=app.session_title or "",
-        )
+        if self._session_has_input():
+            app.session_manager.save(
+                app.session_id,
+                app.agent.to_dict(),
+                title=app.session_title or "",
+            )
         self.app.exit()
 
 
     # ── Helpers ─────────────────────────────────────────────────
 
-    def _update_token_count(self) -> None:
+    def _session_has_input(self) -> bool:
+        """Whether the current conversation contains at least one user message."""
         app: Agent2App = self.app  # type: ignore[assignment]
-        usage = getattr(app.agent, "_last_usage", None)
-        if usage:
-            self.query_one(StatusBar).token_count = usage.total_tokens
+        return any(m.role == Role.USER for m in app.agent.messages)
+
+    def _save_session(self) -> None:
+        """Persist the current session, skipping empty (no-input) conversations.
+
+        An empty session — nothing but the system prompt, e.g. the app was
+        opened and quit without sending a message — must not create a record.
+        """
+        app: Agent2App = self.app  # type: ignore[assignment]
+        if not self._session_has_input():
+            return
+        app.session_manager.save(app.session_id, app.agent.to_dict())
+
+    def _reset_usage(self) -> None:
+        """Zero the LLM usage counters and the status bar token readouts.
+
+        Called when the current conversation changes (``/new``, ``/resume``):
+        restored sessions have no persisted usage, so showing the previous
+        conversation's totals would be misleading.
+        """
+        app: Agent2App = self.app  # type: ignore[assignment]
+        llm = app.agent.llm
+        llm.total_usage = Usage()
+        llm.last_usage = None
+        status = self.query_one(StatusBar)
+        status.input_tokens = 0
+        status.output_tokens = 0
+        status.context_tokens = 0
+
+    def _sync_status_bar(self) -> None:
+        """Push model name and token usage from the agent's LLM to the bar."""
+        app: Agent2App = self.app  # type: ignore[assignment]
+        status = self.query_one(StatusBar)
+        llm = app.agent.llm
+
+        status.model_name = llm.model
+        status.context_window = getattr(llm, "context_window", 0) or 0
+
+        total = getattr(llm, "total_usage", None)
+        if total is not None:
+            status.input_tokens = total.prompt_tokens
+            status.output_tokens = total.completion_tokens
+
+        # Current context size = prompt tokens of the most recent request
+        # (the prompt of the last call contains the whole conversation).
+        last = getattr(llm, "last_usage", None)
+        if last is not None and last.prompt_tokens:
+            status.context_tokens = last.prompt_tokens
 
 
 # ── Context injection ───────────────────────────────────────────

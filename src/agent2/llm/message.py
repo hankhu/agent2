@@ -152,6 +152,14 @@ class Usage(BaseModel):
     completion_tokens: int = 0
     total_tokens: int = 0
 
+    def __add__(self, other: Usage) -> Usage:
+        """Accumulate usage across requests (used by ``BaseLLM._record_usage``)."""
+        return Usage(
+            prompt_tokens=self.prompt_tokens + other.prompt_tokens,
+            completion_tokens=self.completion_tokens + other.completion_tokens,
+            total_tokens=self.total_tokens + other.total_tokens,
+        )
+
 
 class LLMResponse(BaseModel):
     """Normalised response from any LLM provider."""

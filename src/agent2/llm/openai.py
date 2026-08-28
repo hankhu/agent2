@@ -103,7 +103,9 @@ class OpenAILLM(BaseLLM):
             req["tools"] = [self._to_oai_tool(t) for t in tools]
 
         response = await client.chat.completions.create(**req)
-        return self._from_oai_response(response)
+        llm_response = self._from_oai_response(response)
+        self._record_usage(llm_response.usage)
+        return llm_response
 
     async def chat_stream(
         self,
@@ -130,6 +132,17 @@ class OpenAILLM(BaseLLM):
 
         stream = await client.chat.completions.create(**req)
         async for chunk in stream:
+            # Providers that honor stream_options={"include_usage": True} attach
+            # usage to the final chunk; capture it when present so last_usage /
+            # total_usage stay live for streamed requests too.
+            if chunk.usage is not None:
+                self._record_usage(
+                    Usage(
+                        prompt_tokens=chunk.usage.prompt_tokens or 0,
+                        completion_tokens=chunk.usage.completion_tokens or 0,
+                        total_tokens=chunk.usage.total_tokens or 0,
+                    )
+                )
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
 

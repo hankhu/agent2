@@ -10,7 +10,9 @@ Screen {
 
 StatusBar {
     dock: top;
-    height: 1;
+    /* content row + the bottom border row: a 1-row bar with a border
+       leaves zero content height and renders nothing. */
+    height: 2;
     background: $panel;
     color: $text-muted;
     padding: 0 1;
