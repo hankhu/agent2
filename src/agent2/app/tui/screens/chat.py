@@ -36,6 +36,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/sessions", "List & manage sessions (resume/rename/delete)"),
     ("/session", "Alias for /sessions"),
     ("/rename", "Rename current session"),
+    ("/export", "Export conversation (/export [path])"),
     ("/help", "Show help"),
     ("/h", "Alias for /help"),
     ("/exit", "Exit application"),
@@ -106,6 +107,10 @@ class ChatScreen(Screen):
         self._thought_start: float | None = None
         self._run_generation = 0
         self._sync_status_bar()
+
+        # If starting or resuming a session with history, render messages
+        if self._session_has_input():
+            self._rebuild_messages()
 
         # Auto-send initial message if provided via -i
         if app.initial_message:
@@ -209,8 +214,16 @@ class ChatScreen(Screen):
         messages = self.query_one("#messages", MessageList)
         status = self.query_one(StatusBar)
 
+        # Log user message
+        app.session_manager.log_event(app.session_id, "USER", text)
+
         original_log = agent.log
-        agent.log = TUILogger(agent.name, screen=self)
+        agent.log = TUILogger(
+            agent.name,
+            screen=self,
+            session_manager=app.session_manager,
+            session_id=app.session_id,
+        )
         agent.approval_callback = self._request_approval  # type: ignore[attr-defined]
         self._thought_start = time.monotonic()
 
@@ -231,11 +244,14 @@ class ChatScreen(Screen):
             processed = await asyncio.to_thread(_process_context, text)
             result = await agent.chat(processed)
             messages.add_assistant_message(result)
+            app.session_manager.log_event(app.session_id, "ASSISTANT", result)
             self._sync_status_bar()
         except asyncio.CancelledError:
             messages.add_system_message("⛔ Interrupted by user.")
+            app.session_manager.log_event(app.session_id, "CANCELLED", "Interrupted by user.")
         except Exception as exc:
             messages.add_system_message(f"❌ Error: {exc}")
+            app.session_manager.log_event(app.session_id, "ERROR", str(exc))
         finally:
             agent.log = original_log
             if generation == self._run_generation:
@@ -350,6 +366,26 @@ class ChatScreen(Screen):
                 f"✏️ Session renamed to: [bold cyan]{app.session_title}[/bold cyan]"
             )
 
+        elif cmd == "/export":
+            if not self._session_has_input():
+                messages.add_system_message("当前会话还没有内容，无法导出。")
+                return
+            app.session_manager.save(
+                app.session_id,
+                app.agent.to_dict(),
+                title=app.session_title or "",
+            )
+            try:
+                out_path = app.session_manager.export(
+                    app.session_id,
+                    dest_path=arg,
+                )
+                messages.add_system_message(
+                    f"📁 Conversation exported to: [bold cyan]{out_path}[/bold cyan]"
+                )
+            except Exception as exc:
+                messages.add_system_message(f"❌ Export failed: {exc}")
+
         elif cmd in ("/help", "/h"):
             messages.add_system_message(
                 "[bold cyan]Commands[/bold cyan]\n"
@@ -359,6 +395,7 @@ class ChatScreen(Screen):
                 "  /sessions       List & manage sessions (resume/rename/delete)\n"
                 "  /resume [id]    Resume session\n"
                 "  /rename <title> Rename current session\n"
+                "  /export [path]  Export conversation history\n"
                 "  /help           This help\n"
                 "  /exit           Quit\n"
                 "\n[bold cyan]Context Injection[/bold cyan]\n"
@@ -386,9 +423,7 @@ class ChatScreen(Screen):
         sessions = app.session_manager.list_sessions()
 
         if arg:
-            match = next(
-                (s for s in sessions if s["id"].startswith(arg)), None,
-            )
+            match = app.session_manager.find_session(arg)
             if match:
                 app.load_session(match["id"])
                 messages.clear_messages()

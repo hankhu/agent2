@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 
 from rich.console import Console
@@ -41,11 +42,31 @@ class AgentLogger:
         log.final_answer("Here is a summary ...")
     """
 
-    def __init__(self, agent_name: str, *, verbose: bool = True) -> None:
+    def __init__(
+        self,
+        agent_name: str,
+        *,
+        verbose: bool = True,
+        log_file: Path | str | None = None,
+    ) -> None:
         self.agent_name = agent_name
         self.verbose = verbose
+        self.log_file = Path(log_file) if log_file else None
         self._step = 0
         self._start_time: float | None = None
+
+    def _write_log(self, tag: str, message: str) -> None:
+        """Write timestamped entry to log file if configured."""
+        if not self.log_file:
+            return
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        entry = f"[{timestamp}] [{tag.upper()}] {message.strip()}\n"
+        try:
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(entry)
+        except OSError:
+            pass
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
@@ -53,6 +74,7 @@ class AgentLogger:
         """Log the beginning of an agent run."""
         self._start_time = time.monotonic()
         self._step = 0
+        self._write_log("START", f"Task: {task}")
         if not self.verbose:
             return
         console.print()
@@ -68,6 +90,7 @@ class AgentLogger:
 
     def finish(self, summary: str | None = None) -> None:
         """Log the end of an agent run."""
+        self._write_log("FINISH", summary or "Task completed")
         if not self.verbose:
             return
         elapsed = (
@@ -89,6 +112,7 @@ class AgentLogger:
     def thought(self, content: str) -> None:
         """Log a reasoning / thinking step."""
         self._step += 1
+        self._write_log(f"THOUGHT_STEP_{self._step}", content)
         if not self.verbose:
             return
         console.print()
@@ -97,6 +121,7 @@ class AgentLogger:
 
     def action(self, tool_name: str, arguments: dict[str, Any] | None = None) -> None:
         """Log a tool invocation."""
+        self._write_log("ACTION", f"{tool_name}({arguments or {}})")
         if not self.verbose:
             return
         table = Table(show_header=False, box=None, padding=(0, 1))
@@ -113,6 +138,8 @@ class AgentLogger:
 
     def observation(self, content: str, *, is_error: bool = False) -> None:
         """Log the result of a tool execution."""
+        tag = "ERROR" if is_error else "OBSERVATION"
+        self._write_log(tag, content)
         if not self.verbose:
             return
         style = "error" if is_error else "observation"
@@ -130,6 +157,7 @@ class AgentLogger:
 
     def final_answer(self, content: str) -> None:
         """Log the final answer returned by the agent."""
+        self._write_log("FINAL_ANSWER", content)
         if not self.verbose:
             return
         console.print(
@@ -145,6 +173,7 @@ class AgentLogger:
 
     def plan(self, steps: list[str]) -> None:
         """Log a generated execution plan."""
+        self._write_log("PLAN", "\n".join(steps))
         if not self.verbose:
             return
         table = Table(title="📝 Execution Plan", show_lines=True, border_style="white")
@@ -155,11 +184,13 @@ class AgentLogger:
         console.print(table)
 
     def plan_step_start(self, index: int, description: str) -> None:
+        self._write_log(f"PLAN_STEP_{index}_START", description)
         if not self.verbose:
             return
         console.print(f"  [plan]▶ Step {index}:[/plan] {description}")
 
     def plan_step_done(self, index: int) -> None:
+        self._write_log(f"PLAN_STEP_{index}_DONE", "Complete")
         if not self.verbose:
             return
         console.print(f"  [observation]✓ Step {index} complete[/observation]")
@@ -167,6 +198,7 @@ class AgentLogger:
     # ── Memory ──────────────────────────────────────────────────────
 
     def memory_recall(self, query: str, results_count: int) -> None:
+        self._write_log("MEMORY_RECALL", f"'{query}' -> {results_count} results")
         if not self.verbose:
             return
         console.print(
@@ -174,6 +206,7 @@ class AgentLogger:
         )
 
     def memory_store(self, summary: str) -> None:
+        self._write_log("MEMORY_STORE", summary)
         if not self.verbose:
             return
         console.print(f"  [memory]💾 Memory stored:[/memory] {summary}")
@@ -181,6 +214,7 @@ class AgentLogger:
     # ── Multi-Agent ─────────────────────────────────────────────────
 
     def delegate(self, from_agent: str, to_agent: str, task: str) -> None:
+        self._write_log("DELEGATE", f"{from_agent} -> {to_agent}: {task}")
         if not self.verbose:
             return
         console.print(
@@ -188,6 +222,7 @@ class AgentLogger:
         )
 
     def agent_message(self, from_agent: str, content: str) -> None:
+        self._write_log("AGENT_MESSAGE", f"{from_agent}: {content}")
         if not self.verbose:
             return
         display = content if len(content) <= 300 else content[:300] + "…"

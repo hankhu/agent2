@@ -525,9 +525,17 @@ async def _run_interactive(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
+    from agent2 import __version__
+
     parser = argparse.ArgumentParser(
         prog="agent2-chat",
         description="Chat with an LLM / ReAct Agent via the agent2 framework.",
+    )
+    parser.add_argument(
+        "--version",
+        "-v",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "-s",

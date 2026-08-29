@@ -6,19 +6,26 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 SESSION_DIR = Path.home() / ".local" / "share" / "agent2" / "sessions"
+LOG_DIR = Path.home() / ".local" / "share" / "agent2" / "logs"
 
 
 class SessionManager:
-    """Manage saving, loading, and listing of agent sessions."""
+    """Manage saving, loading, listing, logging, and exporting of agent sessions."""
 
-    def __init__(self, session_dir: Path = SESSION_DIR) -> None:
+    def __init__(
+        self,
+        session_dir: Path = SESSION_DIR,
+        log_dir: Path = LOG_DIR,
+    ) -> None:
         self.session_dir = session_dir
+        self.log_dir = log_dir
         try:
             self.session_dir.mkdir(parents=True, exist_ok=True)
+            self.log_dir.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
 
@@ -53,7 +60,33 @@ class SessionManager:
             # Auto-save is best-effort; never block the TUI because the
             # session directory is not writable.
             pass
+
+        # Ensure session log file exists
+        log_path = self.get_log_path(session_id)
+        if not log_path.exists():
+            self._init_log_from_messages(session_id, agent_data.get("messages", []))
+
         return path
+
+    def _init_log_from_messages(
+        self,
+        session_id: str,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        """Create a log file from conversation messages if missing."""
+        log_path = self.get_log_path(session_id)
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            lines = [f"[{timestamp}] [SESSION_INIT] Session ID: {session_id}\n"]
+            for m in messages:
+                role = (m.get("role") or "").upper()
+                content = m.get("content") or ""
+                if role and content:
+                    lines.append(f"[{timestamp}] [{role}] {content}\n")
+            log_path.write_text("".join(lines), encoding="utf-8")
+        except OSError:
+            pass
 
     def rename(self, session_id: str, new_title: str) -> None:
         """Rename a session title."""
@@ -68,12 +101,11 @@ class SessionManager:
         )
 
     def load(self, session_id: str) -> dict[str, Any]:
-
         """Load a session by its ID.  Raises ``FileNotFoundError``."""
         path = self.session_dir / f"{session_id}.json"
         if not path.exists():
             raise FileNotFoundError(f"Session '{session_id}' not found")
-        return json.loads(path.read_text(encoding="utf-8"))
+        return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """Return metadata of all saved sessions, newest first."""
@@ -91,10 +123,160 @@ class SessionManager:
         sessions.sort(key=lambda s: s["saved_at"], reverse=True)
         return sessions
 
+    def get_latest_session(self) -> dict[str, Any] | None:
+        """Return the most recently saved session metadata, or None."""
+        sessions = self.list_sessions()
+        return sessions[0] if sessions else None
+
+    def find_session(self, query: str) -> dict[str, Any] | None:
+        """Find a session matching query by ID or title.
+
+        Match priority:
+        1. Exact session ID match
+        2. Exact title match (case-insensitive)
+        3. Prefix session ID match
+        4. Substring title match (case-insensitive)
+        """
+        q = query.strip()
+        if not q:
+            return None
+        sessions = self.list_sessions()
+        if not sessions:
+            return None
+
+        q_lower = q.lower()
+
+        # 1. Exact ID
+        for s in sessions:
+            if s["id"] == q:
+                return s
+
+        # 2. Exact Title
+        for s in sessions:
+            if s.get("title", "").strip().lower() == q_lower:
+                return s
+
+        # 3. Prefix ID
+        for s in sessions:
+            if s["id"].startswith(q):
+                return s
+
+        # 4. Substring in Title
+        for s in sessions:
+            if q_lower in s.get("title", "").lower():
+                return s
+
+        return None
+
+    def get_log_path(self, session_id: str) -> Path:
+        """Return the path to the session's log file."""
+        return self.log_dir / f"{session_id}.log"
+
+    def log_event(self, session_id: str, tag: str, message: str) -> None:
+        """Append a timestamped log entry to the session log file."""
+        log_path = self.get_log_path(session_id)
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        entry = f"[{timestamp}] [{tag.upper()}] {message.strip()}\n"
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(entry)
+        except OSError:
+            pass
+
+    def export(
+        self,
+        session_id: str,
+        dest_path: Path | str | None = None,
+    ) -> Path:
+        """Export session conversation history to Markdown, JSON, or text.
+
+        If dest_path is omitted or a directory, defaults to ./session_<session_id>.md.
+        Format is inferred from file extension (.md, .json, .txt), defaulting to Markdown.
+        """
+        data = self.load(session_id)
+        title = data.get("title") or "Untitled Session"
+        agent_data = data.get("agent", {})
+        messages = agent_data.get("messages", [])
+        saved_at_ts = data.get("saved_at", 0)
+        saved_at_str = (
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(saved_at_ts))
+            if saved_at_ts
+            else time.strftime("%Y-%m-%d %H:%M:%S")
+        )
+
+        if dest_path:
+            p = Path(dest_path).expanduser()
+            if p.is_dir():
+                p = p / f"session_{session_id}.md"
+        else:
+            p = Path.cwd() / f"session_{session_id}.md"
+
+        p.parent.mkdir(parents=True, exist_ok=True)
+        ext = p.suffix.lower()
+
+        if ext == ".json":
+            p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        elif ext == ".txt":
+            lines = [
+                f"Session: {title}",
+                f"Session ID: {session_id}",
+                f"Date: {saved_at_str}",
+                "=" * 40,
+                "",
+            ]
+            for m in messages:
+                role = m.get("role", "")
+                content = m.get("content", "")
+                if role == "user":
+                    lines.append(f"User:\n{content}\n")
+                elif role == "assistant":
+                    lines.append(f"Assistant:\n{content}\n")
+                elif role == "tool":
+                    tr = m.get("tool_result", {})
+                    lines.append(f"Tool Output:\n{tr.get('content', '')}\n")
+            p.write_text("\n".join(lines), encoding="utf-8")
+        else:
+            # Default to Markdown (.md)
+            lines = [
+                f"# Conversation: {title}",
+                f"- **Session ID**: `{session_id}`",
+                f"- **Date**: `{saved_at_str}`",
+                "",
+                "---",
+                "",
+            ]
+            for m in messages:
+                role = m.get("role", "")
+                content = m.get("content") or ""
+                if role == "user":
+                    lines.append(f"### 👤 User\n\n{content}\n")
+                elif role == "assistant":
+                    lines.append("### 🤖 Assistant\n")
+                    if content:
+                        lines.append(f"{content}\n")
+                    tool_calls = m.get("tool_calls", [])
+                    if tool_calls:
+                        for tc in tool_calls:
+                            tc_name = tc.get("name", "tool")
+                            tc_args = json.dumps(tc.get("arguments", {}), ensure_ascii=False, indent=2)
+                            lines.append(f"> **Tool Call**: `{tc_name}`\n> ```json\n> {tc_args}\n> ```\n")
+                elif role == "tool":
+                    tr = m.get("tool_result", {})
+                    tc_id = tr.get("tool_call_id", "")
+                    tr_content = tr.get("content", "")
+                    is_err = tr.get("is_error", False)
+                    header = "❌ **Tool Error**" if is_err else "👁️ **Tool Output**"
+                    lines.append(f"> {header} (`{tc_id}`):\n> ```\n> {tr_content}\n> ```\n")
+            p.write_text("\n".join(lines), encoding="utf-8")
+
+        return p
+
     def delete(self, session_id: str) -> None:
-        """Delete a session file."""
+        """Delete a session file and its associated log file."""
         path = self.session_dir / f"{session_id}.json"
         path.unlink(missing_ok=True)
+        log_path = self.log_dir / f"{session_id}.log"
+        log_path.unlink(missing_ok=True)
 
 
 def _extract_title(agent_data: dict[str, Any]) -> str:

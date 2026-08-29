@@ -82,32 +82,58 @@ class TUIReActAgent(ReActAgent):
 
 
 class TUILogger(AgentLogger):
-    """Replaces the default rich-console logger to post Textual messages."""
+    """Replaces the default rich-console logger to post Textual messages and write session logs."""
 
-    def __init__(self, agent_name: str, *, screen: ChatScreen) -> None:
+    def __init__(
+        self,
+        agent_name: str,
+        *,
+        screen: ChatScreen,
+        session_manager: SessionManager | None = None,
+        session_id: str | None = None,
+    ) -> None:
         super().__init__(agent_name, verbose=False)
         self._screen = screen
+        self._session_manager = session_manager
+        self._session_id = session_id
 
     def start(self, task: str) -> None:
         self._start_time = time.monotonic()
         self._step = 0
+        if self._session_manager and self._session_id:
+            self._session_manager.log_event(self._session_id, "START", f"Task: {task}")
 
     def thought(self, content: str) -> None:
         self._step += 1
         self._screen.post_message(ThoughtReceived(content, self._step))
+        if self._session_manager and self._session_id:
+            self._session_manager.log_event(
+                self._session_id, f"THOUGHT_STEP_{self._step}", content
+            )
 
     def action(self, tool_name: str, arguments: dict[str, Any] | None = None) -> None:
         self._screen.post_message(ToolCallStarted(tool_name, arguments or {}))
         self._screen.post_message(StatusText(f"Running {tool_name}…"))
+        if self._session_manager and self._session_id:
+            self._session_manager.log_event(
+                self._session_id, "ACTION", f"{tool_name}({arguments or {}})"
+            )
 
     def observation(self, content: str, *, is_error: bool = False) -> None:
         self._screen.post_message(ToolCallCompleted(content, is_error))
+        if self._session_manager and self._session_id:
+            tag = "ERROR" if is_error else "OBSERVATION"
+            self._session_manager.log_event(self._session_id, tag, content)
 
     def final_answer(self, content: str) -> None:
-        pass  # The worker posts the AssistantMessage directly.
+        if self._session_manager and self._session_id:
+            self._session_manager.log_event(self._session_id, "FINAL_ANSWER", content)
 
     def finish(self, summary: str | None = None) -> None:
-        pass
+        if self._session_manager and self._session_id:
+            self._session_manager.log_event(
+                self._session_id, "FINISH", summary or "Task completed"
+            )
 
 
 # ── Textual Application ────────────────────────────────────────
@@ -118,6 +144,24 @@ DEFAULT_SYSTEM_MSG = (
     "executing shell commands). Use tools proactively when needed to inspect files, "
     "run commands, or create/modify code."
 )
+
+
+def restore_agent(
+    agent: ReActAgent,
+    session_manager: SessionManager,
+    session_id: str,
+) -> str | None:
+    """Restore agent state from session on disk and return session title."""
+    data = session_manager.load(session_id)
+    agent_data = data["agent"]
+    tools = list(agent.tool_registry.list_tools())
+    restored = BaseAgent.from_dict(agent_data, llm=agent.llm, tools=tools)
+    assert isinstance(restored, ReActAgent)
+    agent.llm = restored.llm
+    agent._messages = restored._messages  # noqa: SLF001
+    agent.system_prompt = restored.system_prompt
+    set_last_model(agent.llm.model)
+    return data.get("title")
 
 
 class Agent2App(App):  # type: ignore[type-arg]
@@ -131,6 +175,7 @@ class Agent2App(App):  # type: ignore[type-arg]
         agent: TUIReActAgent,
         session_manager: SessionManager | None = None,
         initial_message: str | None = None,
+        resume_session_id: str | None = None,
     ) -> None:
         super().__init__()
         self.agent = agent
@@ -138,6 +183,8 @@ class Agent2App(App):  # type: ignore[type-arg]
         self.session_id = uuid.uuid4().hex[:8]
         self.session_title: str | None = None
         self.initial_message = initial_message
+        if resume_session_id:
+            self.load_session(resume_session_id)
 
     def on_mount(self) -> None:
         self.push_screen(ChatScreen())
@@ -153,18 +200,8 @@ class Agent2App(App):  # type: ignore[type-arg]
         self.session_title = None
 
     def load_session(self, session_id: str) -> None:
-        data = self.session_manager.load(session_id)
-        agent_data = data["agent"]
-        tools = list(self.agent.tool_registry.list_tools())
-        restored = BaseAgent.from_dict(agent_data, llm=self.agent.llm, tools=tools)
-        # Preserve TUI-specific attributes
-        assert isinstance(restored, ReActAgent)
-        self.agent.llm = restored.llm
-        self.agent._messages = restored._messages  # noqa: SLF001
-        self.agent.system_prompt = restored.system_prompt
+        self.session_title = restore_agent(self.agent, self.session_manager, session_id)
         self.session_id = session_id
-        self.session_title = data.get("title")
-        set_last_model(self.agent.llm.model)
 
 
 
