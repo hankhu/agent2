@@ -114,6 +114,21 @@ create_llm("deepseek")
 
 三级 fallback + 模糊匹配，对外只暴露一个函数。
 
+### 2.7 门面与安全沙箱模式 — TUI 交互模式架构
+
+```
+User Input
+    │
+    ▼
+ChatScreen (Dispatcher)
+    ├── /plan  ──▶ Planner (意图解析 + DAG 任务拆解 + 交互调整)
+    ├── /ask   ──▶ Ask Sandbox (只读 System Prompt + Schema 裁剪 + 拦截兜底)
+    └── /agent ──▶ Default Autonomous Agent (全功能工具 + HITL 审批)
+```
+
+- **门面分发**：`ChatScreen` 集中管理交互状态机，根据当前交互模式将用户意图路由至相应的推理或调度管线。
+- **只读沙箱双重防护**：在 Ask 模式下，同时在提示词注入、LLM Tool Schema 列表和运行时工具拦截三层设防，严格确保零文件修改与零进程执行风险。
+
 ---
 
 ## 3. 数据流
@@ -179,6 +194,42 @@ Supervisor LLM.chat(messages, agent_tools)
     └── no tool_call ──▶ Final Answer
 ```
 
+### 3.4 TUI Plan 模式 DAG 调度与 Sub-Agent 隔离执行流
+
+```
+User Goal (Plan 模式)
+    │
+    ▼
+LLM generate_plan() ──▶ 提取任务依赖与上下文需求，输出结构化 DAG Plan
+    │
+    ▼
+用户交互调优 / 确认 ("yes" / "确认")
+    │
+    ▼
+退出 Plan 模式，切入 Agent 模式
+    │
+    ▼
+topological_sort_tasks() ──▶ Kahn 算法拓扑排序为有序任务列表
+    │
+    ▼
+for task in ordered_tasks:
+    │  1. 抽取声明的特定上下文 (context_needed)
+    │  2. 提取前序依赖任务输出 (dependencies results)
+    │  3. 构造隔离 Prompt (杜绝全量历史上下文污染)
+    │
+    ▼
+派发独立 SubAgent.run(isolated_prompt)
+    │
+    ▼
+汇总所有子任务执行结果
+    │
+    ▼
+synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
+    │
+    ▼
+成对原子记录 (User Goal, Final Answer) 并持久化
+```
+
 ---
 
 ## 4. 状态管理设计
@@ -203,6 +254,11 @@ Supervisor LLM.chat(messages, agent_tools)
 
 - OpenAI 规范约束：如果 Assistant 发起包含 `tool_calls` 的消息，其后续消息中必须且仅能紧跟对应 `tool_call_id` 的 Tool 消息。
 - 系统在 `BaseAgent.chat()`、`BaseAgent.from_dict()` 以及 `OpenAILLM._repair_tool_messages()` 中内置自愈机制：检测并自动补齐因异常、取消或旧存档缺失的 Tool 响应，杜绝 API 400 校验错误。
+
+### 4.5 TUI 模式状态机与上下文隔离
+
+- **模式生命周期**：`ChatScreen` 与 `Agent2App` 协同维护当前活动模式。在 Plan 模式下保持临时未确认计划草稿 (`_pending_plan`)；用户确认后状态机原子转换回缺省 Agent 模式。
+- **子任务执行上下文隔离**：每个子任务派发时采用专职 `SubAgent` 实例，不共享主 Agent 的多轮对话上下文 `_messages`，仅显式透传其依赖项结果，从根本上防止多步骤任务导致的上下文过载与噪声干扰。
 
 ---
 

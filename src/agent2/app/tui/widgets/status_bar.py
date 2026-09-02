@@ -44,6 +44,7 @@ class StatusBar(Static):
 
     SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
+    mode: reactive[str] = reactive("AGENT")
     model_name: reactive[str] = reactive("—")
     busy: reactive[bool] = reactive(False)
     status_text: reactive[str] = reactive("")
@@ -74,8 +75,16 @@ class StatusBar(Static):
             return ""
         return f" ({round(n * 100 / self.context_window)}%)"
 
-    def render(self) -> str:  # type: ignore[override]
-        parts = [f"Agent2 │ Model: {self.model_name}"]
+    def render(self) -> str:
+        mode_upper = self.mode.upper()
+        if mode_upper == "PLAN":
+            mode_badge = "[bold yellow]PLAN[/bold yellow]"
+        elif mode_upper == "ASK":
+            mode_badge = "[bold cyan]ASK[/bold cyan]"
+        else:
+            mode_badge = "[bold green]AGENT[/bold green]"
+
+        parts = [f"Agent2 \\[{mode_badge}] │ Model: {self.model_name}"]
 
         if self.busy:
             frame = self.SPINNER_FRAMES[self._frame % len(self.SPINNER_FRAMES)]

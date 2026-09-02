@@ -34,18 +34,73 @@ from agent2.app.tui.styles import APP_CSS
 
 
 class TUIReActAgent(ReActAgent):
-    """ReActAgent variant with human-in-the-loop approval for side-effecting tools."""
+    """ReActAgent variant with human-in-the-loop approval and mode enforcement."""
 
-    SAFE_TOOLS: frozenset[str] = frozenset({"file_read", "list_directory", "web_search"})
+    SAFE_TOOLS: frozenset[str] = frozenset({"file_read", "read_file", "list_directory", "web_search"})
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, mode: str = "agent", **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.approval_callback: Any = None
         self._auto_approved: set[str] = set()
+        self.mode = mode
+
+    def set_mode(self, mode: str) -> None:
+        self.mode = mode
+        if mode == "ask":
+            if self.system_prompt == DEFAULT_SYSTEM_MSG:
+                self.set_rule(ASK_SYSTEM_MSG)
+        elif mode == "agent":
+            if self.system_prompt == ASK_SYSTEM_MSG:
+                self.set_rule(DEFAULT_SYSTEM_MSG)
+
+    async def _run_loop(self) -> str:
+        """Execute ReAct loop with mode-filtered tool schemas."""
+        from agent2.agent.base import MaxIterationsExceeded
+
+        if self.max_iterations < 1:
+            raise ValueError(f"max_iterations must be >= 1, got {self.max_iterations}")
+
+        all_schemas = self.tool_registry.list_schemas()
+        if self.mode == "ask":
+            tool_schemas = [s for s in all_schemas if s.name in self.SAFE_TOOLS] or None
+        else:
+            tool_schemas = all_schemas or None
+
+        for iteration in range(1, self.max_iterations + 1):
+            response = await self.llm.chat(
+                self._messages,
+                tools=tool_schemas,
+            )
+
+            if response.has_tool_calls:
+                if response.content:
+                    self.log.thought(response.content)
+                self._messages.append(response.message)
+                tool_results = await self._execute_tool_calls(response.tool_calls)
+                self._messages.extend(tool_results)
+                continue
+
+            final_answer = response.content or ""
+            self.log.final_answer(final_answer)
+            return final_answer
+
+        raise MaxIterationsExceeded(
+            f"Agent '{self.name}' exceeded {self.max_iterations} iterations"
+        )
 
     async def _execute_tool_calls(self, tool_calls: list[Any]) -> list[Message]:
         results: list[Message] = []
         for tc in tool_calls:
+            # Enforce read-only constraint in Ask mode
+            if self.mode == "ask" and tc.name not in self.SAFE_TOOLS:
+                err_msg = (
+                    f"Tool '{tc.name}' is forbidden in Ask mode. "
+                    "All write and execution operations are disabled."
+                )
+                self.log.observation(err_msg, is_error=True)
+                results.append(Message.tool(tc.id, err_msg, is_error=True))
+                continue
+
             # Gate side-effecting tools behind HITL
             needs_approval = (
                 tc.name not in self.SAFE_TOOLS
@@ -145,6 +200,12 @@ DEFAULT_SYSTEM_MSG = (
     "run commands, or create/modify code."
 )
 
+ASK_SYSTEM_MSG = (
+    "You are a helpful assistant operating in Ask mode (Read-Only). "
+    "You can answer questions, explain concepts, and inspect files/directories using read-only tools. "
+    "All file modifications, writing operations, and shell/command executions are strictly forbidden."
+)
+
 
 def restore_agent(
     agent: ReActAgent,
@@ -179,6 +240,7 @@ class Agent2App(App):  # type: ignore[type-arg]
         session_manager: SessionManager | None = None,
         initial_message: str | None = None,
         resume_session_id: str | None = None,
+        mode: str = "agent",
     ) -> None:
         super().__init__()
         self.agent = agent
@@ -186,6 +248,9 @@ class Agent2App(App):  # type: ignore[type-arg]
         self.session_id = uuid.uuid4().hex[:8]
         self.session_title: str | None = None
         self.initial_message = initial_message
+        self.mode = mode
+        if hasattr(self.agent, "set_mode"):
+            self.agent.set_mode(mode)
         if resume_session_id:
             self.load_session(resume_session_id)
 
@@ -193,6 +258,11 @@ class Agent2App(App):  # type: ignore[type-arg]
         self.push_screen(ChatScreen())
 
     # ── public helpers used by ChatScreen ────────────────────────
+
+    def set_mode(self, mode: str) -> None:
+        self.mode = mode
+        if hasattr(self.agent, "set_mode"):
+            self.agent.set_mode(mode)
 
     def switch_model(self, model_name: str) -> None:
         self.agent.llm = create_llm(model_name)
@@ -216,19 +286,31 @@ def build_tui_agent(
     model: str | None = None,
     system_msg: str | None = None,
     no_tools: bool = False,
+    mode: str = "agent",
 ) -> TUIReActAgent:
     """Create a :class:`TUIReActAgent` with sensible defaults."""
     cfg = load_config()
     name_or_model = model or get_last_model() or cfg.default or cfg.llm.model
 
     llm = create_llm(name_or_model)
-    tools: list[Tool] = [] if no_tools else [file_read, file_write, shell_exec]
+    tools: list[Any]
+    if no_tools:
+        tools = []
+    elif mode == "ask":
+        tools = [file_read]
+    else:
+        tools = [file_read, file_write, shell_exec]
+
+    if system_msg is None:
+        sys_msg = ASK_SYSTEM_MSG if mode == "ask" else DEFAULT_SYSTEM_MSG
+    else:
+        sys_msg = system_msg
 
     return TUIReActAgent(
         name="assistant",
         llm=llm,
-        system_prompt=system_msg or DEFAULT_SYSTEM_MSG,
+        system_prompt=sys_msg,
         tools=tools,
-
         verbose=True,
+        mode=mode,
     )

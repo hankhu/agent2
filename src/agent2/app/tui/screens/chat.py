@@ -6,7 +6,7 @@ import asyncio
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import work
 from textual.binding import Binding
@@ -16,7 +16,15 @@ from textual.screen import Screen
 from textual.widgets import OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
-from agent2.llm.message import Role, Usage
+from agent2.llm.message import Message as LLMMessage, Role, Usage
+from agent2.app.tui.planner import (
+    Plan,
+    format_plan_markdown,
+    generate_plan,
+    is_plan_confirmation,
+    synthesize_plan_results,
+    topological_sort_tasks,
+)
 from agent2.app.tui.widgets.input_area import ChatInput
 from agent2.app.tui.widgets.message_list import MessageList
 from agent2.app.tui.widgets.status_bar import StatusBar
@@ -28,6 +36,9 @@ if TYPE_CHECKING:
 # ── Slash command definitions ───────────────────────────────────
 
 SLASH_COMMANDS: list[tuple[str, str]] = [
+    ("/plan", "Plan mode: analyze intent, break down tasks, confirm and execute"),
+    ("/ask", "Ask mode: read-only Q&A, write & execute disabled"),
+    ("/agent", "Agent mode (default): full ReAct agent with tools"),
     ("/model", "Switch LLM model"),
     ("/models", "Alias for /model"),
     ("/clear", "Clear display"),
@@ -106,6 +117,8 @@ class ChatScreen(Screen):
         self._current_tool_card = None
         self._thought_start: float | None = None
         self._run_generation = 0
+        self._pending_plan: Plan | None = None
+        self._plan_goal: str = ""
         self._sync_status_bar()
 
         # If starting or resuming a session with history, render messages
@@ -119,6 +132,11 @@ class ChatScreen(Screen):
             self.query_one("#messages", MessageList).add_user_message(msg)
             self._run_agent(msg)
 
+    def _switch_mode(self, new_mode: str) -> None:
+        app: Agent2App = self.app  # type: ignore[assignment]
+        app.set_mode(new_mode)
+        self._sync_status_bar()
+
     # ── Input handling ──────────────────────────────────────────
 
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
@@ -129,10 +147,27 @@ class ChatScreen(Screen):
             self._handle_command(text)
             return
 
-        # Echo the user message into the chat window immediately, *before*
-        # any (potentially slow) context expansion or LLM request.
-        self.query_one("#messages", MessageList).add_user_message(text)
-        self._run_agent(text)
+        app: Agent2App = self.app  # type: ignore[assignment]
+        messages = self.query_one("#messages", MessageList)
+
+        if getattr(app, "mode", "agent") == "plan":
+            messages.add_user_message(text)
+            if self._pending_plan and is_plan_confirmation(text):
+                plan = self._pending_plan
+                goal = self._plan_goal or plan.goal
+                self._pending_plan = None
+                self._plan_goal = ""
+                self._switch_mode("agent")
+                messages.add_system_message(
+                    "✅ 计划已确认，已退出 Plan 模式并进入 Agent 模式，开始派发子任务执行..."
+                )
+                self._run_plan_execution(plan, goal)
+            else:
+                self._run_plan_generation(text)
+        else:
+            # agent or ask mode
+            messages.add_user_message(text)
+            self._run_agent(text)
 
     # ── Completion ──────────────────────────────────────────────
 
@@ -261,6 +296,147 @@ class ChatScreen(Screen):
         # Auto-save (skipped when the conversation has no input at all)
         self._save_session()
 
+    @work(exclusive=True, group="agent")
+    async def _run_plan_generation(self, user_text: str) -> None:
+        """Analyze intent and generate/refine a structured plan."""
+        app: Agent2App = self.app  # type: ignore[assignment]
+        messages = self.query_one("#messages", MessageList)
+        status = self.query_one(StatusBar)
+
+        app.session_manager.log_event(app.session_id, "PLAN_INPUT", user_text)
+
+        self._run_generation += 1
+        generation = self._run_generation
+        status.busy = True
+        status.status_text = "Analyzing intent & planning…"
+
+        try:
+            processed = await asyncio.to_thread(_process_context, user_text)
+            existing = self._pending_plan
+            plan = await generate_plan(
+                app.agent.llm,
+                user_intent=self._plan_goal or processed,
+                existing_plan=existing,
+                feedback=processed if existing else None,
+            )
+            self._pending_plan = plan
+            if not self._plan_goal:
+                self._plan_goal = processed
+
+            md_table = format_plan_markdown(plan)
+            messages.add_assistant_message(md_table)
+            app.session_manager.log_event(app.session_id, "PLAN_PROPOSAL", md_table)
+            self._sync_status_bar()
+        except asyncio.CancelledError:
+            messages.add_system_message("⛔ Interrupted by user.")
+            app.session_manager.log_event(app.session_id, "CANCELLED", "Interrupted by user.")
+        except Exception as exc:
+            messages.add_system_message(f"❌ Planning error: {exc}")
+            app.session_manager.log_event(app.session_id, "ERROR", str(exc))
+        finally:
+            if generation == self._run_generation:
+                status.busy = False
+                status.status_text = ""
+
+        self._save_session()
+
+    @work(exclusive=True, group="agent")
+    async def _run_plan_execution(self, plan: Plan, original_goal: str) -> None:
+        """Execute subtasks in topological dependency order and synthesize final answer."""
+        from agent2.app.tui.app import TUILogger, build_tui_agent
+
+        app: Agent2App = self.app  # type: ignore[assignment]
+        messages = self.query_one("#messages", MessageList)
+        status = self.query_one(StatusBar)
+
+        app.session_manager.log_event(
+            app.session_id, "PLAN_EXECUTE_START", f"Goal: {original_goal}"
+        )
+
+        self._run_generation += 1
+        generation = self._run_generation
+        status.busy = True
+
+        ordered_tasks = topological_sort_tasks(plan.tasks)
+        task_results: dict[str, str] = {}
+        recorded_results: list[dict[str, Any]] = []
+
+        try:
+            total = len(ordered_tasks)
+            for idx, task in enumerate(ordered_tasks, 1):
+                status.status_text = f"Subtask [{idx}/{total}] (#{task.id})…"
+                messages.add_system_message(
+                    f"▶ 正在执行子任务 [{idx}/{total}] (ID: {task.id}): {task.description}"
+                )
+
+                # Assemble isolated context: only task dependencies and context needed
+                dep_contexts = []
+                for dep_id in task.dependencies:
+                    if dep_id in task_results:
+                        dep_contexts.append(
+                            f"• 前序任务 #{dep_id} 结果:\n{task_results[dep_id]}"
+                        )
+                dep_text = "\n\n".join(dep_contexts) if dep_contexts else "无（无前序依赖）"
+
+                subtask_prompt = (
+                    f"【子任务目标】\n{task.description}\n\n"
+                    f"【所需特定上下文】\n{task.context_needed or '无'}\n\n"
+                    f"【依赖任务输出】\n{dep_text}\n\n"
+                    "请根据上述特定上下文和依赖任务输出，使用可用工具完成该子任务，并提供清晰准确的执行结果总结。"
+                )
+
+                # Create dedicated subagent with isolated context
+                subagent = build_tui_agent(
+                    model=app.agent.llm.model,
+                    mode="agent",
+                )
+                subagent.log = TUILogger(
+                    f"SubAgent-{task.id}",
+                    screen=self,
+                    session_manager=app.session_manager,
+                    session_id=app.session_id,
+                )
+                subagent.approval_callback = self._request_approval
+                self._thought_start = time.monotonic()
+
+                # Execute subtask
+                res = await subagent.run(subtask_prompt)
+                task_results[task.id] = res
+                recorded_results.append({
+                    "id": task.id,
+                    "description": task.description,
+                    "result": res,
+                })
+                messages.add_system_message(
+                    f"✓ 子任务 [{idx}/{total}] (ID: {task.id}) 执行完成。"
+                )
+
+            # Synthesize final answer from all subtask results
+            status.status_text = "Synthesizing final answer…"
+            final_answer = await synthesize_plan_results(
+                app.agent.llm,
+                goal=original_goal,
+                task_results=recorded_results,
+            )
+            messages.add_assistant_message(final_answer)
+            app.session_manager.log_event(app.session_id, "FINAL_ANSWER", final_answer)
+            app.agent._messages.append(LLMMessage.user(original_goal))
+            app.agent._messages.append(LLMMessage.assistant(final_answer))
+            self._sync_status_bar()
+
+        except asyncio.CancelledError:
+            messages.add_system_message("⛔ Interrupted by user.")
+            app.session_manager.log_event(app.session_id, "CANCELLED", "Interrupted by user.")
+        except Exception as exc:
+            messages.add_system_message(f"❌ Execution error: {exc}")
+            app.session_manager.log_event(app.session_id, "ERROR", str(exc))
+        finally:
+            if generation == self._run_generation:
+                status.busy = False
+                status.status_text = ""
+
+        self._save_session()
+
     # ── HITL approval via Future ────────────────────────────────
 
     async def _request_approval(self, tool_call) -> str:  # type: ignore[type-arg]
@@ -331,6 +507,36 @@ class ChatScreen(Screen):
                         )
                 self.app.push_screen(ModelSelectScreen(), callback=on_model)
 
+        elif cmd == "/plan":
+            self._switch_mode("plan")
+            if arg:
+                messages.add_user_message(arg)
+                self._run_plan_generation(arg)
+            else:
+                messages.add_system_message(
+                    "📋 已激活 Plan 模式。请输入您的任务目标以分析意图并生成任务列表。"
+                )
+
+        elif cmd == "/ask":
+            self._switch_mode("ask")
+            if arg:
+                messages.add_user_message(arg)
+                self._run_agent(arg)
+            else:
+                messages.add_system_message(
+                    "💬 已激活 Ask 模式（只读）。所有文件写入与命令执行操作已被禁止。"
+                )
+
+        elif cmd == "/agent":
+            self._switch_mode("agent")
+            if arg:
+                messages.add_user_message(arg)
+                self._run_agent(arg)
+            else:
+                messages.add_system_message(
+                    "🤖 已切换至 Agent 模式（缺省模式）。完整工具调用已就绪。"
+                )
+
         elif cmd == "/clear":
             messages.clear_messages()
             messages.add_system_message("🧹 Display cleared.")
@@ -339,6 +545,8 @@ class ChatScreen(Screen):
             self._save_session()
             app.agent.reset()
             app.new_session_id()
+            self._pending_plan = None
+            self._plan_goal = ""
             messages.clear_messages()
             self._reset_usage()
             self.query_one(StatusBar).reset_timer()
@@ -388,7 +596,11 @@ class ChatScreen(Screen):
 
         elif cmd in ("/help", "/h"):
             messages.add_system_message(
-                "[bold cyan]Commands[/bold cyan]\n"
+                "[bold cyan]Modes[/bold cyan]\n"
+                "  /plan [goal]    Plan mode: break down tasks, confirm, and execute with subagents\n"
+                "  /ask [query]    Ask mode: read-only Q&A (write & execute operations disabled)\n"
+                "  /agent [prompt] Agent mode (default): full autonomous agent with tools\n"
+                "\n[bold cyan]Commands[/bold cyan]\n"
                 "  /model [name]   Switch model\n"
                 "  /clear          Clear display\n"
                 "  /new            New session\n"
@@ -529,11 +741,12 @@ class ChatScreen(Screen):
         status.context_tokens = 0
 
     def _sync_status_bar(self) -> None:
-        """Push model name and token usage from the agent's LLM to the bar."""
+        """Push model name, token usage, and mode from the app/agent to the bar."""
         app: Agent2App = self.app  # type: ignore[assignment]
         status = self.query_one(StatusBar)
         llm = app.agent.llm
 
+        status.mode = getattr(app, "mode", "agent").upper()
         status.model_name = llm.model
         status.context_window = getattr(llm, "context_window", 0) or 0
 

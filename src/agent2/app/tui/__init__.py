@@ -72,6 +72,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Export session conversation history to Markdown/JSON/text file.",
     )
     parser.add_argument(
+        "--mode",
+        choices=["agent", "plan", "ask"],
+        default="agent",
+        help="Initial interaction mode: agent (default), plan, or ask.",
+    )
+    parser.add_argument(
         "-p",
         metavar="MSG",
         default=None,
@@ -148,6 +154,7 @@ def main(argv: list[str] | None = None) -> None:
         model=model,
         system_msg=args.sys_msg,
         no_tools=args.no_tools,
+        mode=args.mode,
     )
 
     if args.model:
@@ -184,6 +191,7 @@ def main(argv: list[str] | None = None) -> None:
         session_manager,
         initial_message=args.i,
         resume_session_id=resume_session_id,
+        mode=args.mode,
     )
     log_path = session_manager.get_log_path(app.session_id)
     agent.log.log_file = log_path

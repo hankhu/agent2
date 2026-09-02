@@ -405,10 +405,28 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
   - `ToolCard` / `DiffView`: 扁平卡片背景与左侧警戒/重点边条，紧凑美观。
   - 模态面板 (`ModelSelectScreen` / `SessionSelectScreen` / `ConfirmModal`): 统一扁平化边框与无外边距紧凑布局。
 
+### 6.11 TUI 三大多模态交互模式与只读沙箱双重防护 (`TUIReActAgent.mode`)
+
+- **模式定义与无缝切换**：支持 Agent（`/agent`）、Plan（`/plan`）、Ask（`/ask`）三种交互模式，可通过 CLI `--mode <mode>` 指定初始模式或在聊天中使用斜杠命令随时切换。
+- **Ask 模式双重安全沙箱**：
+  1. *Schema 级过滤*：在 `_run_loop()` 中，向 LLM 声明工具时仅透传 `SAFE_TOOLS`（`file_read`, `read_file`, `list_directory`, `web_search`），从源头上隐藏写和执行工具（如 `file_write`, `shell_exec`, `python_exec` 等）。
+  2. *运行时拦截兜底*：在 `_execute_tool_calls()` 中硬性校验工具名称，若命中非只读工具直接注入错误观察（`is_error=True`），杜绝 LLM 幻觉生成越权调用。
+  3. *动态切换系统提示词*：进入 Ask 模式自动应用只读专用 System Prompt，切回 Agent 模式自动复原。
+
+### 6.12 Plan 模式 DAG 任务拆解、拓扑调度与 Sub-Agent 上下文隔离 (`planner.py` / `screens/chat.py`)
+
+- **意图分析与结构化生成**：`generate_plan()` 引导 LLM 输出包含任务 ID、依赖列表 (`dependencies`) 与特定上下文需求 (`context_needed`) 的标准 JSON，并通过 `format_plan_markdown()` 格式化为直观的 Markdown 表格。
+- **动态调优与确认状态机**：支持在 Plan 模式下多轮对话修改计划；`is_plan_confirmation()` 智能识别确认词（如 `yes`、`确认`、`ok`、`同意`、`开始` 等），确认后平滑退出 Plan 模式并进入 Agent 模式执行。
+- **Kahn 算法拓扑排序 (`topological_sort_tasks`)**：根据依赖图解析任务拓扑序列；具备自愈降级保护，检测到环路或孤岛时安全回退至原始任务列表。
+- **Sub-Agent 隔离派发与防污染执行**：针对每个子任务动态构建独立的 `TUIReActAgent`，**仅向其 prompt 注入所声明需要的上下文及前序依赖任务的产出**，杜绝全量历史上下文膨胀与长上下文注意力干扰。
+- **最终结果归纳与消息原子配对**：各子任务执行完毕后，调用 `synthesize_plan_results()` 统一生成最终回答，并在主会话消息历史中成对追加 `(Message.user(original_goal), Message.assistant(final_answer))`，保障会话存档与后续多轮对话的上下文结构规范。
+
+### 6.13 顶部状态栏模式徽标 (Mode Badge) 响应式渲染 (`StatusBar`)
+
+- `StatusBar` 定义 reactive `mode` 字段；`ChatScreen._sync_status_bar()` 实时向状态栏同步当前模式。
+- 渲染器使用 Rich 颜色标签呈现醒目徽标：`[AGENT]`（绿色）、`[PLAN]`（黄色）、`[ASK]`（青色），使用户时刻清晰感知当前上下文所处的操作模式与安全权限级别。
+
 ---
-
-
-
 
 ## 7. 异步设计
 
@@ -427,6 +445,8 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 | 历史会话缺失 tool 消息 | `_repair_tool_messages()` 自动补齐合成错误结果，防止 API 400 |
 | Agent 超过最大迭代 | 抛出 `MaxIterationsExceeded`，`chat()` 捕获后返回友好提示；`max_iterations < 1` 在入口处校验 |
 | LLM 返回非法 JSON（计划/反思） | `extract_json()` 容忍 Markdown 代码块包裹；反思解析失败时返回 `passed=False` 并记录警告日志（不再静默假设通过） |
+| Ask 模式尝试调用写/执行工具 | 两道防线：`_run_loop()` 过滤 Schema + `_execute_tool_calls()` 强行拦截并返回错误工具响应 |
+| Plan 模式任务依赖存在环路 | Kahn 算法检测到环路或不可达时安全降级为原任务顺序，避免死锁或崩溃 |
 | 配置文件不存在或格式错误 | 静默返回默认配置；`load_models()` 中 `create_llm` 失败时记录警告并跳过 |
 | openai 包未安装 | 延迟到首次使用时才 `ImportError`，附带安装提示 |
 | 记忆持久化文件损坏 | 静默忽略，使用空记忆启动 |
@@ -434,4 +454,5 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 | 工具动态加载失败 | 仅捕获 `ImportError` / `AttributeError`，附带警告日志（不再 `except Exception: pass`） |
 
 **设计思想：Agent 系统应尽量自愈，避免因单点故障中断整个推理流程。**
+
 

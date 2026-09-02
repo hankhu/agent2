@@ -1,5 +1,5 @@
-src/**/__pycache__/
-src/**/*.pyc
+**/__pycache__/
+**/*.pyc
 
 # Local configuration / secrets — never commit these
 config.json

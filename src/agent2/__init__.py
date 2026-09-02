@@ -7,7 +7,7 @@ try:
     from importlib.metadata import PackageNotFoundError, version
     __version__ = version("agent2")
 except PackageNotFoundError:
-    __version__ = "0.1.3.6"
+    __version__ = "0.1.3.7"
 
 __all__ = [
     "__version__",
