@@ -426,6 +426,19 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 - `StatusBar` 定义 reactive `mode` 字段；`ChatScreen._sync_status_bar()` 实时向状态栏同步当前模式。
 - 渲染器使用 Rich 颜色标签呈现醒目徽标：`[AGENT]`（绿色）、`[PLAN]`（黄色）、`[ASK]`（青色），使用户时刻清晰感知当前上下文所处的操作模式与安全权限级别。
 
+### 6.14 流式嵌入确认卡片 (`ConfirmCard`) 与工具执行结果控制 (`ToolCard` / `Ctrl+O`)
+
+- **流式嵌入与卡片化 (`ConfirmCard`)**：
+  - 将工具审批从阻断式弹层重构为嵌入 `MessageList` 消息流的轻量卡片，自然随历史消息滚动。
+  - 单行紧凑显示提示标题、高亮工具名与彩色参数键值（`key='value'`）。
+  - 支持 `file_write` 下方直接内联彩色 Diff 预览。
+  - 挂载即自动获得焦点（聚焦在 `[y] Approve`），支持 `Left` / `Right`（`h` / `l`）循环切换按钮焦点，支持 `y` / `n` / `a` / `Esc` 全套单键快捷操作。
+  - 按钮采用透明底色（`background: transparent`），仅以绿色/红色/黄色高亮文字，极简无多余边距。
+  - 审批完成后，按钮栏原子替换为 `✓ Approved` / `✗ Rejected` / `✓ Always Allowed` 状态标识，焦点自动交还输入框 `#chat-input`。
+- **工具执行结果面板（Result Panel）默认折叠与快捷切换**：
+  - `ToolCard` 中的工具执行结果面板（`.tool-result`）统一默认呈折叠状态（`collapsed=True`），边距紧凑化（`padding: 0 1; margin: 0;`），避免大量工具输出占用过多屏幕空间。
+  - `ChatScreen` 注册全局快捷键 `Ctrl+O`（`action_toggle_tool_results`），一键批量展开或收起所有工具执行结果面板。
+
 ---
 
 ## 7. 异步设计

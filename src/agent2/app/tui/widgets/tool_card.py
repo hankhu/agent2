@@ -30,11 +30,10 @@ class ToolCard(Vertical):
             status.update("[green]✓ Success[/green]")
 
         display = content if len(content) <= 500 else content[:500] + "\n… (truncated)"
-        collapsed = len(content) > 200
         result = Collapsible(
             Static(display),
             title="Result",
-            collapsed=collapsed,
+            collapsed=True,
             classes="tool-result",
         )
         self.mount(result)

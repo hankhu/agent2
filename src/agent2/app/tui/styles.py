@@ -75,15 +75,27 @@ ToolCard {
     height: auto;
 }
 
+ToolCard #tool-status {
+    margin: 0;
+    padding: 0;
+    height: auto;
+}
+
 ToolCard .tool-result {
     height: auto;
     margin: 0;
+    padding: 0;
     border: none;
 }
 
 ToolCard .tool-result > Contents {
     height: auto;
     padding: 0;
+}
+
+ToolCard .tool-result CollapsibleTitle {
+    padding: 0;
+    margin: 0;
 }
 
 /* ── Diff View ──────────────────────────────────────────────── */
@@ -141,38 +153,60 @@ DiffView {
     text-align: right;
 }
 
-/* ── Confirm Modal ──────────────────────────────────────────── */
+/* ── Confirm Card (Inline Approval) ────────────────────────── */
 
-ConfirmModal {
-    align: center bottom;
-    background: $background 60%;
-}
-
-ConfirmModal #confirm-dialog {
-    width: 100%;
+ConfirmCard {
+    margin: 1 0 0 1;
+    padding: 0 1;
+    background: $panel 40%;
+    border-left: solid $warning;
     height: auto;
-    max-height: 80%;
-    border-top: solid $warning;
-    background: $panel;
-    padding: 1 2;
-    margin-bottom: 0;
 }
 
-ConfirmModal #confirm-dialog DiffView {
+ConfirmCard DiffView {
     margin: 1 0;
-    max-height: 20;
+    max-height: 16;
     overflow-y: auto;
 }
 
-ConfirmModal #confirm-buttons {
-    height: 3;
-    align-horizontal: center;
-    margin-top: 1;
+ConfirmCard #confirm-buttons {
+    height: 1;
+    min-height: 1;
+    align-horizontal: left;
+    margin: 0;
+    padding: 0;
 }
 
-ConfirmModal #confirm-buttons Button {
-    margin: 0 1;
+ConfirmCard #confirm-buttons Button {
+    background: transparent;
     border: none;
+    height: 1;
+    min-height: 1;
+    min-width: 8;
+    padding: 0 1;
+    margin: 0 1 0 0;
+}
+
+ConfirmCard #confirm-buttons Button:focus {
+    background: $panel 80%;
+    text-style: bold;
+}
+
+ConfirmCard #confirm-buttons Button:hover {
+    background: $panel 60%;
+}
+
+ConfirmCard #confirm-status {
+    margin: 0;
+    height: 1;
+}
+
+ConfirmModal {
+    margin: 1 0 0 1;
+    padding: 0 1;
+    background: $panel 40%;
+    border-left: solid $warning;
+    height: auto;
 }
 
 /* ── Model Select ───────────────────────────────────────────── */

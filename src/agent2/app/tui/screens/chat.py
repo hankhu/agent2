@@ -97,6 +97,7 @@ class ChatScreen(Screen):
 
     BINDINGS = [
         Binding("ctrl+c", "interrupt", "Interrupt", priority=True),
+        Binding("ctrl+o", "toggle_tool_results", "Toggle Results", priority=True),
         Binding("ctrl+d", "quit_app", "Quit", priority=True),
     ]
 
@@ -106,7 +107,7 @@ class ChatScreen(Screen):
         with Vertical(id="input-area"):
             yield OptionList(id="completion-list")
             yield Static(
-                "Enter ↵ send  │  Shift+Enter ↵ newline  │  Ctrl+D quit",
+                "Enter ↵ send  │  Shift+Enter ↵ newline  │  Ctrl+O results  │  Ctrl+D quit",
                 id="input-hint",
             )
             yield ChatInput(id="chat-input")
@@ -440,17 +441,17 @@ class ChatScreen(Screen):
     # ── HITL approval via Future ────────────────────────────────
 
     async def _request_approval(self, tool_call) -> str:  # type: ignore[type-arg]
-        from agent2.app.tui.widgets.confirm_modal import ConfirmModal
-
         future: asyncio.Future[str] = asyncio.get_event_loop().create_future()
+        messages = self.query_one("#messages", MessageList)
 
-        def on_result(result: str) -> None:
+        def on_decision(result: str) -> None:
             if not future.done():
                 future.set_result(result or "reject")
 
-        self.app.push_screen(
-            ConfirmModal(tool_call.name, tool_call.arguments),
-            callback=on_result,
+        messages.add_confirm_card(
+            tool_call.name,
+            tool_call.arguments,
+            on_decision=on_decision,
         )
         return await future
 
@@ -693,6 +694,17 @@ class ChatScreen(Screen):
             if w.group == "agent" and w.is_running:
                 w.cancel()
                 return
+
+    def action_toggle_tool_results(self) -> None:
+        """Ctrl+O: toggle expand/collapse state on all tool result panels."""
+        from textual.widgets import Collapsible
+
+        results = list(self.query(Collapsible).filter(".tool-result"))
+        if not results:
+            return
+        any_collapsed = any(r.collapsed for r in results)
+        for r in results:
+            r.collapsed = not any_collapsed
 
     def action_quit_app(self) -> None:
         """Ctrl+D: save the session (unless empty) and exit."""

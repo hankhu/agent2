@@ -1,6 +1,6 @@
 """TUI widgets for agent2."""
 
-from agent2.app.tui.widgets.confirm_modal import ConfirmModal
+from agent2.app.tui.widgets.confirm_modal import ConfirmCard, ConfirmModal
 from agent2.app.tui.widgets.diff_view import DiffView
 from agent2.app.tui.widgets.input_area import ChatInput
 from agent2.app.tui.widgets.message_list import (
@@ -16,6 +16,7 @@ from agent2.app.tui.widgets.tool_card import ToolCard
 __all__ = [
     "AssistantMessage",
     "ChatInput",
+    "ConfirmCard",
     "ConfirmModal",
     "DiffView",
     "MessageList",

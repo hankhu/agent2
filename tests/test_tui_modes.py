@@ -442,3 +442,114 @@ async def test_plan_execution_workflow_and_context_isolation() -> None:
     assert parent_agent.messages[1].role == Role.ASSISTANT
     assert parent_agent.messages[1].content == final
 
+
+# ── 7. ConfirmCard Inline Layout & Button Focus Tests ──────────
+
+
+@pytest.mark.asyncio
+async def test_confirm_card_inline_focus_and_navigation() -> None:
+    from textual.widgets import Button
+    from agent2.app.tui.widgets.confirm_modal import ConfirmCard
+    from agent2.app.tui.widgets.message_list import MessageList
+
+    app = Agent2App(agent=build_tui_agent())
+    async with app.run_test(size=(80, 24)) as pilot:
+        messages = pilot.app.screen.query_one("#messages", MessageList)
+        large_args = {f"arg_{i}": f"value_{i}_" * 10 for i in range(10)}
+
+        decision_received = None
+
+        def on_decision(val: str) -> None:
+            nonlocal decision_received
+            decision_received = val
+
+        card = messages.add_confirm_card("shell_exec", large_args, on_decision=on_decision)
+        await pilot.pause()
+
+        # 1. Verify card is embedded in messages list (flow layout)
+        assert card in list(messages.children)
+
+        # 2. Verify initial focus is on the approve button
+        approve_btn = card.query_one("#approve", Button)
+        reject_btn = card.query_one("#reject", Button)
+        always_btn = card.query_one("#always", Button)
+        assert approve_btn.has_focus
+
+        # 3. Test right arrow switches focus to reject -> always -> wraps to approve
+        await pilot.press("right")
+        assert reject_btn.has_focus
+
+        await pilot.press("right")
+        assert always_btn.has_focus
+
+        await pilot.press("right")
+        assert approve_btn.has_focus
+
+        # 4. Test left arrow switches focus in reverse
+        await pilot.press("left")
+        assert always_btn.has_focus
+
+        # 5. Test pressing enter on always button submits 'always'
+        await pilot.press("enter")
+        await pilot.pause()
+        assert decision_received == "always"
+        assert card._decision == "always"
+        assert card.query("#confirm-status")
+
+
+@pytest.mark.asyncio
+async def test_confirm_card_shortcuts_and_focus_return() -> None:
+    from agent2.app.tui.widgets.message_list import MessageList
+
+    app = Agent2App(agent=build_tui_agent())
+    async with app.run_test(size=(80, 24)) as pilot:
+        messages = pilot.app.screen.query_one("#messages", MessageList)
+        chat_input = pilot.app.screen.query_one("#chat-input")
+
+        decisions = []
+        card1 = messages.add_confirm_card("file_write", {"path": "a.txt"}, on_decision=lambda r: decisions.append(r))
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        assert decisions[-1] == "approve"
+        assert chat_input.has_focus
+
+        card2 = messages.add_confirm_card("file_write", {"path": "b.txt"}, on_decision=lambda r: decisions.append(r))
+        await pilot.pause()
+        await pilot.press("n")
+        await pilot.pause()
+        assert decisions[-1] == "reject"
+        assert chat_input.has_focus
+
+
+@pytest.mark.asyncio
+async def test_tool_result_panel_collapsed_and_ctrl_o_toggle() -> None:
+    from textual.widgets import Collapsible
+    from agent2.app.tui.widgets.message_list import MessageList
+
+    app = Agent2App(agent=build_tui_agent())
+    async with app.run_test(size=(80, 24)) as pilot:
+        messages = pilot.app.screen.query_one("#messages", MessageList)
+        card = messages.add_tool_card("file_read", {"path": "test.py"})
+        await pilot.pause()
+        card.set_result("file contents: line 1\nline 2")
+        await pilot.pause()
+
+        result_w = card.query_one(".tool-result", Collapsible)
+        # 1. Verify collapsed by default
+        assert result_w.collapsed is True
+
+        # 2. Press ctrl+o to expand
+        await pilot.press("ctrl+o")
+        await pilot.pause()
+        assert result_w.collapsed is False
+
+        # 3. Press ctrl+o again to collapse
+        await pilot.press("ctrl+o")
+        await pilot.pause()
+        assert result_w.collapsed is True
+
+
+
+
+

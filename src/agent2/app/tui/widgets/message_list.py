@@ -5,6 +5,7 @@ from __future__ import annotations
 from textual.containers import ScrollableContainer, Vertical
 from textual.widgets import Collapsible, Markdown, Static
 
+from agent2.app.tui.widgets.confirm_modal import ConfirmCard
 from agent2.app.tui.widgets.tool_card import ToolCard
 
 
@@ -42,6 +43,17 @@ class MessageList(ScrollableContainer):
 
     def add_tool_card(self, tool_name: str, arguments: dict) -> ToolCard:  # type: ignore[type-arg]
         card = ToolCard(tool_name, arguments)
+        self.mount(card)
+        card.scroll_visible()
+        return card
+
+    def add_confirm_card(
+        self,
+        tool_name: str,
+        arguments: dict,  # type: ignore[type-arg]
+        on_decision=None,
+    ) -> ConfirmCard:
+        card = ConfirmCard(tool_name, arguments, on_decision=on_decision)
         self.mount(card)
         card.scroll_visible()
         return card
