@@ -278,17 +278,26 @@ def load_models() -> dict[str, Any]:
     dict[str, OpenAILLM]
         Mapping of model name → instantiated LLM instance.
     """
+    import logging
+
     from agent2.llm import create_llm
 
+    _log = logging.getLogger(__name__)
     config = load_config()
     instances: dict[str, Any] = {}
 
     for key in config.models:
-        instances[key] = create_llm(key)
+        try:
+            instances[key] = create_llm(key)
+        except Exception as exc:
+            _log.warning("Failed to load model '%s': %s", key, exc)
 
     for p_key in config.providers:
         if p_key not in instances:
-            instances[p_key] = create_llm(p_key)
+            try:
+                instances[p_key] = create_llm(p_key)
+            except Exception as exc:
+                _log.warning("Failed to load provider '%s': %s", p_key, exc)
 
     return instances
 

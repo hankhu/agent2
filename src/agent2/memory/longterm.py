@@ -63,9 +63,10 @@ class LongTermMemory(BaseMemory):
             "metadata": metadata,
             "embedding": embedding,
         })
-        # Rebuild IDF for TF-IDF
+        # Rebuild IDF and recompute all TF-IDF vectors for consistency
         if self._embedding_provider == "tfidf":
             self._rebuild_idf()
+            self._recompute_tfidf_vectors()
         # Persist if configured
         if self._persist_path:
             self._save()
@@ -153,6 +154,15 @@ class LongTermMemory(BaseMemory):
             for word, freq in doc_freq.items()
         }
 
+    def _recompute_tfidf_vectors(self) -> None:
+        """Recompute all document TF-IDF vectors using current vocab and IDF.
+
+        Called after ``_rebuild_idf`` to ensure new and old documents share the
+        same vector space (consistent dimensionality and IDF weights).
+        """
+        for doc in self._documents:
+            doc["embedding"] = self._embed_tfidf(doc["content"])
+
     async def _embed_openai(self, text: str) -> list[float]:
         """Generate embedding via OpenAI API."""
         try:
@@ -193,9 +203,14 @@ class LongTermMemory(BaseMemory):
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:
-        """Simple whitespace tokenizer with lowercasing."""
+        """Tokenizer with CJK character-level splitting.
+
+        ASCII words are split by ``\\w+``; CJK characters are emitted
+        individually (a simple but effective strategy without extra deps).
+        """
         import re
-        return re.findall(r'\w+', text.lower())
+        # \w+ captures ASCII/latin words; CJK Unified Ideographs individually
+        return re.findall(r'[\u4e00-\u9fff]|\w+', text.lower())
 
     def _save(self) -> None:
         """Persist memory to disk."""

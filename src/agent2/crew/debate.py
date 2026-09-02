@@ -7,8 +7,6 @@ Useful for tasks requiring diverse viewpoints or high accuracy.
 
 from __future__ import annotations
 
-from typing import Any
-
 from agent2.agent.base import BaseAgent
 from agent2.crew.base import BaseCrew
 from agent2.llm.base import BaseLLM

@@ -6,12 +6,15 @@ and retry if quality is insufficient. Can be mixed into any agent type.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from agent2.llm.base import BaseLLM
 from agent2.llm.message import Message, Role
+from agent2.utils.json_helpers import extract_json
 from agent2.utils.logging import AgentLogger
 
+_log = logging.getLogger(__name__)
 
 _REFLECTION_PROMPT = """You are a critical reviewer. Evaluate the following response to the given task.
 
@@ -72,15 +75,11 @@ class ReflectionMixin:
                 f"Score {score}/10 — {feedback}"
             )
 
-            # Retry with feedback
-            result = await self._retry_with_feedback(llm, task_str, result, feedback)
+            # Retry using the agent's full reasoning loop (preserves tool usage)
+            result = await self._retry_with_feedback(task_str, result, feedback)
             log.final_answer(result)
 
-        if hasattr(self, "_messages") and self._messages and self._messages[-1].role == Role.ASSISTANT:
-            self._messages[-1].content = result
-
         return result
-
 
     @staticmethod
     async def _reflect(
@@ -97,26 +96,23 @@ class ReflectionMixin:
 
         content = llm_response.content or ""
         try:
-            return json.loads(content.strip())
+            parsed = extract_json(content)
+            if isinstance(parsed, dict):
+                return parsed
         except json.JSONDecodeError:
-            # If parsing fails, assume it passed
-            return {"score": 10, "passed": True, "feedback": ""}
+            _log.warning("Reflection JSON parse failed, raw content: %s", content[:200])
+        return {"score": 0, "passed": False, "feedback": "Failed to parse evaluation; retrying."}
 
-    @staticmethod
     async def _retry_with_feedback(
-        llm: BaseLLM, task: str, previous: str, feedback: str
+        self, task: str, previous: str, feedback: str  # type: ignore[override]
     ) -> str:
-        """Generate an improved response incorporating feedback."""
-        response = await llm.chat([
-            Message.system(
-                "You previously answered a task but your answer needs improvement. "
-                "Generate an improved response based on the feedback."
-            ),
-            Message.user(
-                f"Original task: {task}\n\n"
-                f"Your previous answer:\n{previous}\n\n"
-                f"Reviewer feedback:\n{feedback}\n\n"
-                f"Please provide an improved answer."
-            ),
-        ])
-        return response.content or previous
+        """Retry using the agent's full chat loop so tools remain available."""
+        retry_prompt = (
+            f"Your previous answer to the task was not satisfactory.\n\n"
+            f"Original task: {task}\n\n"
+            f"Your previous answer:\n{previous}\n\n"
+            f"Reviewer feedback:\n{feedback}\n\n"
+            f"Please provide an improved answer. You may use tools if needed."
+        )
+        # Use super().chat which goes through the full ReAct/_run_loop cycle
+        return await super().chat(retry_prompt)  # type: ignore[misc]

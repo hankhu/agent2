@@ -236,8 +236,9 @@ class BaseAgent(ABC):
                         val = getattr(builtin_module, attr_name)
                         if isinstance(val, Tool) and val.name in tool_names:
                             resolved_tools.append(val)
-                except Exception:
-                    pass
+                except (ImportError, AttributeError) as exc:
+                    import logging
+                    logging.getLogger(__name__).warning("Failed to load builtin tools: %s", exc)
 
         agent = agent_cls(
             name=name,

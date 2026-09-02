@@ -17,6 +17,7 @@ from agent2.agent.base import BaseAgent, MaxIterationsExceeded
 from agent2.llm.base import BaseLLM
 from agent2.llm.message import Message
 from agent2.tools.base import Tool
+from agent2.utils.json_helpers import extract_json
 
 
 _PLANNER_PROMPT = """You are a planning agent. Given a task, create a detailed step-by-step plan.
@@ -152,14 +153,8 @@ class PlannerAgent(BaseAgent):
         ])
 
         content = response.content or "[]"
-        # Extract JSON from possible markdown code blocks
-        if "```" in content:
-            content = content.split("```")[1]
-            if content.startswith("json"):
-                content = content[4:]
-
         try:
-            plan = json.loads(content.strip())
+            plan = extract_json(content)
             if isinstance(plan, list):
                 return [str(s) for s in plan]
         except json.JSONDecodeError:
@@ -213,7 +208,7 @@ class PlannerAgent(BaseAgent):
 
             return response.content or ""
 
-        return "(Step execution reached iteration limit)"
+        return "[LIMIT] Step execution reached iteration limit without a final answer."
 
     async def _maybe_replan(
         self,

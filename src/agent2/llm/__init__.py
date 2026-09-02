@@ -71,8 +71,9 @@ def create_llm(name_or_model: str = "openai", **kwargs: Any) -> OpenAILLM:
         if resolved:
             merged = {**resolved, **kwargs}
             return OpenAILLM(**merged)
-    except Exception:
-        pass
+    except (ImportError, FileNotFoundError, KeyError) as exc:
+        import logging
+        logging.getLogger(__name__).debug("Config-based LLM creation skipped: %s", exc)
 
     # 2. Built-in presets
     if key in ("openai", "default"):

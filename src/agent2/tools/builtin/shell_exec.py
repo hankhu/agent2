@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 
 from agent2.tools.base import tool
 
@@ -23,6 +25,7 @@ async def shell_exec(command: str, timeout: float = 30.0) -> str:
             command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            preexec_fn=os.setsid,
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(
@@ -30,8 +33,8 @@ async def shell_exec(command: str, timeout: float = 30.0) -> str:
             )
         except asyncio.TimeoutError:
             try:
-                proc.kill()
-            except Exception:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (OSError, ProcessLookupError):
                 pass
             return f"Error: Command timed out after {timeout} seconds."
 

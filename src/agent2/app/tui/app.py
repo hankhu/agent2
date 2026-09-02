@@ -156,7 +156,10 @@ def restore_agent(
     agent_data = data["agent"]
     tools = list(agent.tool_registry.list_tools())
     restored = BaseAgent.from_dict(agent_data, llm=agent.llm, tools=tools)
-    assert isinstance(restored, ReActAgent)
+    if not isinstance(restored, ReActAgent):
+        raise ValueError(
+            f"Session contains agent type '{type(restored).__name__}', expected ReActAgent."
+        )
     agent.llm = restored.llm
     agent._messages = restored._messages  # noqa: SLF001
     agent.system_prompt = restored.system_prompt

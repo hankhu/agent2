@@ -79,7 +79,8 @@ def _repair_tool_messages(messages: list[Message]) -> list[Message]:
 _TYPE_MAP = {str: "string", int: "integer", float: "number", bool: "boolean", list: "array", dict: "object"}
 ```
 
-- 只映射 JSON Schema 的基础类型，泛型容器（`list[X]`、`dict[X, Y]`）通过 `__origin__` 判断。
+- 只映射 JSON Schema 的基础类型，泛型容器（`list[X]`、`dict[X, Y]`）通过 `get_origin()` 判断。
+- `Optional[X]` / `Union[X, None]` / `X | None` 自动解包为内层类型。
 - 不支持的类型统一降级为 `"string"`，保证不崩溃。
 
 ### 2.2 同步函数异步化
@@ -92,7 +93,7 @@ else:
 ```
 
 - 同步工具函数被包装到 `asyncio.to_thread()` 中执行，不阻塞事件循环。
-- 构造时通过 `asyncio.iscoroutinefunction()` 判断，运行时零开销分发。
+- 构造时通过 `inspect.iscoroutinefunction()` 判断，运行时零开销分发。
 
 ### 2.3 工具执行错误不中断 Agent
 
@@ -155,13 +156,13 @@ IMPORTANT — Avoid redundant tool calls:
 
 ```python
 try:
-    plan = json.loads(content.strip())
+    plan = extract_json(content)  # 容忍 markdown 代码块、正则提取
 except json.JSONDecodeError:
     return [line.strip() for line in content.strip().split("\n") if line.strip()]
 ```
 
-- 先尝试 JSON 解析；处理 markdown 代码块包裹的情况；最终 fallback 到按行切分。
-- 确保即使 LLM 输出格式不完美，也能提取出计划步骤。
+- 使用共享的 `extract_json()` 工具函数（`utils.json_helpers`），依次尝试 Markdown 代码块提取、正则匹配 JSON 数组/对象、纯文本解析。
+- 最终 fallback 到按行切分，确保即使 LLM 输出格式不完美也能提取出计划步骤。
 
 ### 3.5 ReflectionMixin 的 super() 链
 
@@ -170,10 +171,14 @@ class ReflectionMixin:
     async def chat(self, msg):
         result = await super().chat(msg)  # 调用被混入类的 chat()
         ...
+    async def _retry_with_feedback(self, task, previous, feedback):
+        return await super().chat(retry_prompt)  # 重试也走完整推理循环
 ```
 
 - 利用 Python MRO（Method Resolution Order），`super().chat()` 沿着 MRO 链调用实际 Agent 类的 `chat()`。
+- **重试时同样通过 `super().chat()` 发起完整推理循环**，保留工具调用能力（而非退化为裸 `llm.chat()`）。
 - `ReflectionMixin` 必须在继承顺序中排在 Agent 类之前：`class X(ReflectionMixin, ReActAgent)`。
+- JSON 评估解析使用 `extract_json()`，解析失败时返回 `passed=False` 并附带警告日志（不再静默假设通过）。
 
 ### 3.6 序列化 hook 机制
 
@@ -248,7 +253,8 @@ def _embed_tfidf(self, text):
 
 - **零外部依赖**的嵌入方案——不需要 numpy、transformers 或 API 调用。
 - 词表动态增长：新词出现时自动扩展 `_vocab`。
-- 每次 `add()` 后重建 IDF（`_rebuild_idf`），保证 IDF 值基于全量文档。
+- 每次 `add()` 后重建 IDF（`_rebuild_idf`）并通过 `_recompute_tfidf_vectors()` 更新所有已有文档的嵌入向量，保证新老文档向量标准一致。
+- 分词器支持 CJK 字符级切分（`[\u4e00-\u9fff]|\w+`），无需额外分词库。
 - 向量长度不固定，`_cosine_similarity` 中用零填充对齐。
 
 ### 4.3 余弦相似度的零填充
@@ -259,8 +265,8 @@ a = a + [0.0] * (max_len - len(a))
 b = b + [0.0] * (max_len - len(b))
 ```
 
-- 因为词表会随新文档增长，历史文档的嵌入向量可能短于查询向量。
-- 用零填充而非重新嵌入——牺牲少量精度换取性能（不需要每次 add 都重新嵌入所有文档）。
+- 因为词表会随新文档增长，查询向量可能与文档向量长度不同。
+- 用零填充对齐——`_recompute_tfidf_vectors()` 已确保所有文档向量使用同一 IDF 权重。
 
 ### 4.4 持久化格式
 
@@ -284,6 +290,7 @@ ToolSchema(
 - 每个工人 Agent 变成 Supervisor LLM 可调用的 "tool"。
 - 复用 LLM 原生的 function calling 能力做路由，不需要额外的分类器或规则引擎。
 - Supervisor 的 system prompt 中注入各 Agent 的角色描述（截取 system_prompt 前 100/200 字符）。
+- 当 Supervisor 同时委派多个 worker 时，通过 `asyncio.gather` 并发执行，避免不必要的串行等待。
 
 ### 5.2 DebateCrew 的批评轮次
 
@@ -418,11 +425,13 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 |------|------|
 | 工具执行异常 | 捕获并转为错误文本返回给 LLM，保证 tool 消息完整闭环 |
 | 历史会话缺失 tool 消息 | `_repair_tool_messages()` 自动补齐合成错误结果，防止 API 400 |
-| Agent 超过最大迭代 | 抛出 `MaxIterationsExceeded`，`chat()` 捕获后返回友好提示 |
-| LLM 返回非法 JSON（计划/反思） | fallback 解析（按行切分 / 假设通过） |
-| 配置文件不存在或格式错误 | 静默返回默认配置 |
+| Agent 超过最大迭代 | 抛出 `MaxIterationsExceeded`，`chat()` 捕获后返回友好提示；`max_iterations < 1` 在入口处校验 |
+| LLM 返回非法 JSON（计划/反思） | `extract_json()` 容忍 Markdown 代码块包裹；反思解析失败时返回 `passed=False` 并记录警告日志（不再静默假设通过） |
+| 配置文件不存在或格式错误 | 静默返回默认配置；`load_models()` 中 `create_llm` 失败时记录警告并跳过 |
 | openai 包未安装 | 延迟到首次使用时才 `ImportError`，附带安装提示 |
 | 记忆持久化文件损坏 | 静默忽略，使用空记忆启动 |
+| Shell 命令超时 | 使用 `os.killpg` 清理整个进程组，防止子进程残留 |
+| 工具动态加载失败 | 仅捕获 `ImportError` / `AttributeError`，附带警告日志（不再 `except Exception: pass`） |
 
 **设计思想：Agent 系统应尽量自愈，避免因单点故障中断整个推理流程。**
 

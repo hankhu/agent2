@@ -223,9 +223,10 @@ Supervisor LLM.chat(messages, agent_tools)
 
 ---
 
-## 6. 日志系统设计
+## 6. 日志与工具函数设计
 
 - 不使用 Python `logging` 模块，而是自建基于 `rich` 的结构化日志——因为 Agent 推理过程的日志需要**语义化展示**（Thought / Action / Observation 用不同颜色和面板区分），标准 logging 的 level-based 方式不适合。
 - 通过 `verbose` 开关控制是否输出，而非 log level。
 - 每个 Agent / Crew 持有独立的 `AgentLogger` 实例，互不干扰。
-
+- 文件日志写入使用 `threading.Lock` 保证多协程/多线程下的并发安全。
+- `utils.json_helpers.extract_json()` 提供从 LLM 输出中鲁棒提取 JSON 的共享工具函数，供 `planner.py`、`reflection.py` 等模块复用。

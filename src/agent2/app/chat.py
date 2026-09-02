@@ -59,6 +59,8 @@ DEFAULT_SYSTEM_MSG = (
 
 def _is_local_or_lan(url: str | None) -> bool:
     """Return True if ``url`` points to localhost or a private LAN address."""
+    import ipaddress
+
     if not url:
         return False
     host = url.lower().strip()
@@ -72,17 +74,12 @@ def _is_local_or_lan(url: str | None) -> bool:
     else:
         host = host.split(":", 1)[0].strip()
 
-    if host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
+    if host in {"localhost", "0.0.0.0"} or host.endswith(".local"):
         return True
-    if host.startswith("127.") or host.startswith("10.") or host.startswith("192.168.") or host.startswith("169.254."):
-        return True
-    if host.startswith("172."):
-        parts = host.split(".")
-        if len(parts) > 1 and parts[1].isdigit() and 16 <= int(parts[1]) <= 31:
-            return True
-    if host.endswith(".local"):
-        return True
-    return False
+    try:
+        return ipaddress.ip_address(host).is_private
+    except ValueError:
+        return False
 
 
 def _provider_from_url(url: str | None) -> str:

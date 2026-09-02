@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.1b — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.6 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -15,7 +15,7 @@
 
 ## 2. 工具系统 (`agent2.tools`)
 
-- **`@tool` 装饰器** — 将普通 Python 函数（同步/异步）转为 `Tool` 对象，从类型注解自动生成 JSON Schema。
+- **`@tool` 装饰器** — 将普通 Python 函数（同步/异步）转为 `Tool` 对象，从类型注解自动生成 JSON Schema，支持 `Optional` / `Union` 类型解包。
 - **ToolRegistry** — 集中式工具注册表，提供 `register` / `unregister` / `get` / `execute` / `list_schemas` / `copy` 等 API。
 - **内置工具**：
   | 工具 | 说明 |
@@ -53,7 +53,8 @@
 ### 3.4 ReflectionMixin
 
 - Mixin 类，可混入任意 Agent，在输出后进行自我评估（1-10 分）。
-- 低于阈值（默认 7 分）时自动带反馈重试，最多 `max_reflections` 轮。
+- 低于阈值（默认 7 分）时自动带反馈重试，**重试过程使用 Agent 完整推理循环（保留工具能力）**，最多 `max_reflections` 轮。
+- JSON 评估结果解析使用 `extract_json` 工具函数，容忍 Markdown 包裹格式。
 
 ## 4. 记忆系统 (`agent2.memory`)
 
@@ -66,7 +67,7 @@
 ### 4.2 LongTermMemory（长期记忆）
 
 - 基于向量余弦相似度的语义检索。
-- **TF-IDF 模式**（默认）— 无外部依赖，纯 Python 实现词频-逆文档频率嵌入。
+- **TF-IDF 模式**（默认）— 无外部依赖，纯 Python 实现词频-逆文档频率嵌入。添加文档后自动重算所有向量保证一致性。支持 CJK 字符级分词。
 - **OpenAI Embeddings 模式** — 调用 `text-embedding-3-small` 获取高质量嵌入。
 - 支持磁盘持久化（JSON 格式保存文档、词表、IDF）。
 
@@ -81,6 +82,7 @@
 
 - 监督者 LLM 通过 tool-calling 动态选择工人 Agent 执行子任务。
 - 每个工人 Agent 被建模为一个 tool（`delegate_to_{name}`），监督者自行决定调用顺序和参数。
+- 多个 worker 任务通过 `asyncio.gather` 并发执行，提升吞吐。
 - 支持独立的 `supervisor_llm`，最多 `max_delegations` 次委派。
 
 ### 5.3 DebateCrew（辩论模式）
@@ -103,6 +105,12 @@
   - 📝 Plan / ▶ Step Start / ✓ Step Done
   - 🧠 Memory Recall / 💾 Memory Store
   - 📨 Delegate / 💬 Agent Message
+- 文件日志写入使用线程锁 (`threading.Lock`) 保证并发安全。
+
+### 6.3 JSON 提取工具 (`utils.json_helpers`)
+
+- `extract_json(text)` — 从 LLM 输出中鲁棒提取 JSON，依次尝试 Markdown 代码块、正则匹配、纯文本解析。
+- 供 `planner.py`、`reflection.py` 等模块复用，替代各自脆弱的手写解析逻辑。
 
 ## 7. 应用层 (`agent2.app`)
 

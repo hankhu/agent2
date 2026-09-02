@@ -99,7 +99,7 @@ agent2/
 ├── agent/      # Agent 核心 — ReAct / Planner / Reflection
 ├── memory/     # 记忆系统 — Working / LongTerm
 ├── crew/       # 多 Agent — Sequential / Supervisor / Debate
-└── utils/      # 配置 + 日志
+└── utils/      # 配置 + 日志 + JSON 提取工具
 ```
 
 ## License

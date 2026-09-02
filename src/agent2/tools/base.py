@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Any, Callable, get_type_hints
+import types
+from typing import Any, Callable, Union, get_args, get_origin, get_type_hints
 
 from agent2.llm.message import ToolParameter, ToolSchema
 
@@ -39,8 +40,14 @@ _TYPE_MAP: dict[type, str] = {
 
 def _python_type_to_json(py_type: Any) -> str:
     """Map a Python type annotation to a JSON Schema type string."""
-    # Handle Optional, Union, etc.
-    origin = getattr(py_type, "__origin__", None)
+    origin = get_origin(py_type)
+
+    # Handle Optional[X] / Union[X, None] — unwrap to X
+    if origin is Union or origin is types.UnionType:
+        args = [a for a in get_args(py_type) if a is not type(None)]
+        if args:
+            return _python_type_to_json(args[0])
+
     if origin is not None:
         # list[X] → "array"
         if origin is list:
@@ -78,7 +85,7 @@ class Tool:
         self.func = func
         self.name = name or func.__name__
         self.description = description or func.__doc__ or ""
-        self._is_async = asyncio.iscoroutinefunction(func)
+        self._is_async = inspect.iscoroutinefunction(func)
         self.schema = self._build_schema()
 
     def _build_schema(self) -> ToolSchema:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,8 @@ _theme = Theme(
 )
 
 console = Console(theme=_theme)
+
+_file_lock = threading.Lock()
 
 
 class AgentLogger:
@@ -63,7 +66,7 @@ class AgentLogger:
         entry = f"[{timestamp}] [{tag.upper()}] {message.strip()}\n"
         try:
             self.log_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.log_file, "a", encoding="utf-8") as f:
+            with _file_lock, open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(entry)
         except OSError:
             pass

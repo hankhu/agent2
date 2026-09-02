@@ -70,6 +70,9 @@ class ReActAgent(BaseAgent):
 
     async def _run_loop(self) -> str:
         """Execute the ReAct loop: Thought → Action → Observation → repeat."""
+        if self.max_iterations < 1:
+            raise ValueError(f"max_iterations must be >= 1, got {self.max_iterations}")
+
         tool_schemas = self.tool_registry.list_schemas() or None
 
         for iteration in range(1, self.max_iterations + 1):

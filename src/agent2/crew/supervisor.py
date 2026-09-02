@@ -7,7 +7,6 @@ uses the LLM's tool-calling ability to select workers dynamically.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from agent2.agent.base import BaseAgent
@@ -78,18 +77,23 @@ class SupervisorCrew(BaseCrew):
                     self.log.thought(response.content)
                 messages.append(response.message)
 
-                for tc in response.tool_calls:
+                # Run independent worker tasks concurrently
+                async def _run_worker(tc: Any) -> tuple[Any, str]:
                     agent_name = tc.name.replace("delegate_to_", "")
-                    agent_task = tc.arguments.get("task", task)
-
+                    agent_task = tc.arguments.get("task", task) if isinstance(tc.arguments, dict) else task
                     agent = self._agent_map.get(agent_name)
                     if agent is None:
-                        result = f"Error: Agent '{agent_name}' not found."
-                    else:
-                        self.log.delegate(self.name, agent_name, agent_task)
-                        result = await agent.run(agent_task)
-                        self.log.agent_message(agent_name, result)
+                        return tc, f"Error: Agent '{agent_name}' not found."
+                    self.log.delegate(self.name, agent_name, agent_task)
+                    result = await agent.run(agent_task)
+                    self.log.agent_message(agent_name, result)
+                    return tc, result
 
+                import asyncio
+                results = await asyncio.gather(
+                    *(_run_worker(tc) for tc in response.tool_calls)
+                )
+                for tc, result in results:
                     messages.append(Message.tool(tc.id, result))
                 continue
 
