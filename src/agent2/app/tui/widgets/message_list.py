@@ -67,10 +67,11 @@ class MessageList(ScrollableContainer):
 
     def add_user_message(self, text: str, message_index: int | None = None) -> UserMessage:
         msg = UserMessage(text, message_index=message_index)
-        self.mount(msg)
+        msg._await_mount = self.mount(msg)
         self._anchor_released = False
         self.scroll_end(animate=False)
         return msg
+
 
     def add_assistant_message(
         self,
@@ -172,6 +173,17 @@ class UserMessage(SelectableMessage):
     def __init__(self, text: str, message_index: int | None = None) -> None:
         super().__init__(message_index=message_index)
         self._text = text
+        self._await_mount: Any = None
+
+    def __await__(self) -> Any:
+        async def _wait() -> UserMessage:
+            if self._await_mount is not None:
+                await self._await_mount
+            if self.parent and hasattr(self.parent, "_maybe_scroll_to_bottom"):
+                self.parent._maybe_scroll_to_bottom()
+            return self
+
+        return _wait().__await__()
 
     def compose(self):  # type: ignore[override]
         yield Static("[bold cyan]You[/bold cyan]")

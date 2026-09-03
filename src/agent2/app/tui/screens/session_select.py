@@ -42,7 +42,7 @@ class SessionSelectScreen(ModalScreen[str]):
 
     def compose(self):  # type: ignore[override]
         with Vertical(id="session-dialog"):
-            yield Static("[bold cyan]💾 Session Management[/bold cyan]\n", id="session-header")
+            yield Static("[bold cyan]💾 Session Management[/bold cyan]", id="session-header")
 
             table: DataTable[str] = DataTable(cursor_type="row")
             table.add_column("#", width=4)

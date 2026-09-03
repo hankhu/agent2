@@ -371,3 +371,36 @@ async def test_slash_command_continue(tmp_path: Path) -> None:
         assistants = list(messages.query(AssistantMessage))
         assert len(assistants) == 2
         assert assistants[1]._content == "Answer continued"
+
+
+@pytest.mark.asyncio
+async def test_user_message_mounted_before_network_request(tmp_path: Path) -> None:
+    events = []
+
+    class OrderTrackingLLM(BaseLLM):
+        def __init__(self) -> None:
+            super().__init__(model="order-mock")
+
+        async def chat(self, messages: list[Message], tools: any = None) -> LLMResponse:
+            user_msg_count = len(app.screen.query_one("#messages", MessageList).query(UserMessage))
+            events.append(("network_start", user_msg_count))
+            return LLMResponse(message=Message.assistant("Order response"))
+
+    agent = TUIReActAgent(name="agent", llm=OrderTrackingLLM())
+    sm = SessionManager(session_dir=tmp_path / "sessions", log_dir=tmp_path / "logs")
+    app = Agent2App(agent=agent, session_manager=sm)
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        chat_input = pilot.app.screen.query_one("#chat-input", ChatInput)
+        chat_input.clear()
+        chat_input.insert("Question text")
+        events.append(("enter_pressed", 0))
+        await pilot.press("enter")
+        await pilot.pause()
+
+        # Verify that by the time chat() was called, the user message was already mounted in #messages
+        assert ("enter_pressed", 0) in events
+        assert len(events) >= 2
+        network_event = [e for e in events if e[0] == "network_start"][0]
+        assert network_event[1] == 1  # UserMessage was already in the DOM and mounted!
+

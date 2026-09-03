@@ -468,6 +468,21 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
   - `ConfirmCard` 识别该工具名并呈现：`⚠ 最大轮数限制：已执行 X 轮对话，是否允许继续执行？`，支持 `[y] 继续`、`[n] 停止`、`[a] 始终允许`。
   - 同意后追加轮数无缝继续；拒绝后抛出 `MaxIterationsExceeded` 结束并生成总结；已结束的任务可通过 `▶ Continue` 按钮或 `/continue` 指令继续唤醒。
 
+### 6.17 TUI 全面扁平化无边框设计、Drop-down Menu 下拉选择器与底部状态栏 (`styles.py` / `screens/model_select.py` / `screens/chat.py`)
+
+- **全面无边框与零衬距设计**：
+  - `styles.py` 彻底移除 `border`、`border-top`、`border-bottom` 及 `border-left` 线条（统一为 `border: none;`），依托背景灰度色阶（`$surface-darken-1`、`$panel` 35%、`$panel` 65% 等）清晰分层。
+  - 清理 `#input-area` 与 `#chat-input` 的 margin 与 padding，使输入框平铺满屏底；清除 `#messages` 与弹窗内部多余边距，消除组件与主窗口间的缝隙。
+- **Textual `Select[str]` 下拉式模型选择器**：
+  - `ModelSelectScreen` 废弃多列 `DataTable` 表格，改用轻量紧凑的 `Select[str]` 组件，弹出时直接聚焦。
+  - 按 Enter 展开下拉选项，支持上下键导航与即打即搜（type-to-search），选取后触发 `Select.Changed` 自动生效并关闭；保留 `#model-input` 兼容手动输入任意模型标识。
+- **底部状态栏流式布局**：
+  - `StatusBar` 从顶层 dock 迁移至界面最底行，处于 `#input-area` 之下。
+  - 弃用容易引发层叠计算冲突的 `dock: bottom`，采用垂直布局自然流式排列（`#messages` 1fr + `#input-area` auto + `StatusBar` 1），保证状态栏始终严丝合缝紧固在终端最后一行。
+- **用户消息即时挂载渲染**：
+  - `ChatScreen._mount_and_render_user_message` 在发送网络请求前立即完成用户消息的 DOM 挂载和贴底刷新，杜绝网络通信阶段的视窗迟滞。
+
+
 ---
 
 ## 7. 异步设计

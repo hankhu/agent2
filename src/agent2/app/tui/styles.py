@@ -9,15 +9,13 @@ Screen {
 /* ── Status Bar ─────────────────────────────────────────────── */
 
 StatusBar {
-    dock: top;
-    /* content row + the bottom border row: a 1-row bar with a border
-       leaves zero content height and renders nothing. */
-    height: 2;
+    height: 1;
     background: $panel;
     color: $text-muted;
     padding: 0 1;
+    margin: 0;
     content-align-horizontal: left;
-    border-bottom: solid $panel-lighten-1 25%;
+    border: none;
 }
 
 /* ── Message List ───────────────────────────────────────────── */
@@ -25,39 +23,41 @@ StatusBar {
 #messages {
     height: 1fr;
     overflow-y: auto;
-    padding: 1 1;
+    padding: 0;
+    margin: 0;
 }
 
 UserMessage {
-    margin: 1 0 0 0;
-    padding: 1 1;
+    margin: 0;
+    padding: 0 1;
     background: $panel 35%;
-    border-left: solid $primary;
+    border: none;
     height: auto;
 }
 
 UserMessage.selected {
-    background: $panel 60%;
-    border-left: double $primary;
+    background: $panel 65%;
+    border: none;
 }
 
 AssistantMessage {
-    margin: 1 0 0 0;
-    padding: 1 1;
+    margin: 0;
+    padding: 0 1;
     background: transparent;
+    border: none;
     height: auto;
 }
 
 AssistantMessage.selected {
     background: $panel 25%;
-    border-left: double $secondary;
+    border: none;
 }
 
 .message-actions {
     display: none;
     height: 1;
     min-height: 1;
-    margin-top: 1;
+    margin-top: 0;
     align-horizontal: right;
 }
 
@@ -100,19 +100,20 @@ AssistantMessage:focus-within .message-actions {
 }
 
 SystemMessage {
-    margin: 1 0 0 0;
+    margin: 0;
     padding: 0 1;
     color: $text-muted;
+    border: none;
     height: auto;
 }
 
 /* ── Thinking Block ─────────────────────────────────────────── */
 
 ThinkingBlock {
-    margin: 1 0 0 1;
+    margin: 0;
     padding: 0 1;
     background: $panel 25%;
-    border-left: solid $secondary 60%;
+    border: none;
     height: auto;
 }
 
@@ -124,10 +125,10 @@ ThinkingBlock > Contents {
 /* ── Tool Card ──────────────────────────────────────────────── */
 
 ToolCard {
-    margin: 1 0 0 1;
+    margin: 0;
     padding: 0 1;
     background: $panel 30%;
-    border-left: solid $warning;
+    border: none;
     height: auto;
 }
 
@@ -157,10 +158,10 @@ ToolCard .tool-result CollapsibleTitle {
 /* ── Content & Diff Folding ─────────────────────────────────── */
 
 .content-collapse {
-    margin: 1 0 0 0;
+    margin: 0;
     padding: 0 1;
     background: $panel 20%;
-    border-left: solid $accent 50%;
+    border: none;
     height: auto;
 }
 
@@ -175,10 +176,10 @@ ToolCard .tool-result CollapsibleTitle {
 }
 
 .diff-collapse {
-    margin: 1 0 0 0;
+    margin: 0;
     padding: 0 1;
     background: $panel 20%;
-    border-left: solid $warning 50%;
+    border: none;
     height: auto;
 }
 
@@ -195,30 +196,31 @@ ToolCard .tool-result CollapsibleTitle {
 /* ── Diff View ──────────────────────────────────────────────── */
 
 DiffView {
-    margin: 1 0 0 1;
+    margin: 0;
     padding: 0 1;
     background: $panel 35%;
-    border-left: solid $accent;
+    border: none;
     height: auto;
 }
 
 /* ── Input Area ─────────────────────────────────────────────── */
 
 #input-area {
-    dock: bottom;
     height: auto;
     max-height: 14;
     background: $surface;
-    border-top: solid $panel-lighten-1 35%;
-    padding: 0 0 1 0;
+    border: none;
+    padding: 0;
+    margin: 0;
 }
 
 #completion-list {
     display: none;
     height: auto;
     max-height: 8;
-    margin: 0 1 1 1;
-    border: solid $primary 50%;
+    margin: 0;
+    padding: 0;
+    border: none;
     background: $panel;
 }
 
@@ -228,37 +230,40 @@ DiffView {
 
 #chat-input {
     height: auto;
-    min-height: 3;
+    min-height: 2;
     max-height: 12;
-    margin: 0 1;
-    border: solid $panel-lighten-1 50%;
+    margin: 0;
+    border: none;
     background: $surface-darken-1;
+    padding: 0 1;
 }
 
 #chat-input:focus {
-    border: solid $primary;
+    border: none;
+    background: $panel 60%;
 }
 
 
 #input-hint {
     height: 1;
     color: $text-muted;
-    padding: 0 2;
+    padding: 0 1;
+    margin: 0;
     text-align: right;
 }
 
 /* ── Confirm Card (Inline Approval) ────────────────────────── */
 
 ConfirmCard {
-    margin: 1 0 0 1;
+    margin: 0;
     padding: 0 1;
     background: $panel 40%;
-    border-left: solid $warning;
+    border: none;
     height: auto;
 }
 
 ConfirmCard DiffView {
-    margin: 1 0;
+    margin: 0;
     max-height: 16;
     overflow-y: auto;
 }
@@ -296,10 +301,10 @@ ConfirmCard #confirm-status {
 }
 
 ConfirmModal {
-    margin: 1 0 0 1;
+    margin: 0;
     padding: 0 1;
     background: $panel 40%;
-    border-left: solid $warning;
+    border: none;
     height: auto;
 }
 
@@ -308,31 +313,53 @@ ConfirmModal {
 ModelSelectScreen {
     align: center middle;
     background: $background 60%;
+    padding: 0;
+    margin: 0;
 }
 
 ModelSelectScreen #model-dialog {
-    width: 86;
+    width: 72;
     height: auto;
     max-height: 85%;
-    border: solid $primary;
+    border: none;
     background: $panel;
-    padding: 1 2;
+    padding: 0 1;
+    margin: 0;
 }
 
-ModelSelectScreen DataTable {
-    height: auto;
-    max-height: 16;
-    margin: 1 0;
+ModelSelectScreen Select {
     border: none;
+    margin: 0;
+    padding: 0;
+}
+
+ModelSelectScreen Select > SelectCurrent {
+    border: none;
+    background: $surface-darken-1;
+    padding: 0 1;
+}
+
+ModelSelectScreen Select:focus > SelectCurrent {
+    border: none;
+    background: $panel-lighten-1 25%;
+}
+
+ModelSelectScreen Select > SelectOverlay {
+    border: none;
+    background: $panel-darken-1;
+    padding: 0;
 }
 
 ModelSelectScreen #model-input {
-    margin: 1 0 0 0;
-    border: solid $primary 50%;
+    margin: 0;
+    border: none;
+    background: $surface-darken-1;
+    padding: 0 1;
 }
 
 ModelSelectScreen #model-input:focus {
-    border: solid $primary;
+    border: none;
+    background: $panel-lighten-1 25%;
 }
 
 /* ── Session Select ─────────────────────────────────────────── */
@@ -340,35 +367,43 @@ ModelSelectScreen #model-input:focus {
 SessionSelectScreen {
     align: center middle;
     background: $background 60%;
+    padding: 0;
+    margin: 0;
 }
 
 SessionSelectScreen #session-dialog {
     width: 96;
     height: auto;
     max-height: 85%;
-    border: solid $primary;
+    border: none;
     background: $panel;
-    padding: 1 2;
+    padding: 0 1;
+    margin: 0;
 }
 
 SessionSelectScreen DataTable {
     height: auto;
     max-height: 20;
-    margin: 1 0;
+    margin: 0;
+    padding: 0;
     border: none;
 }
 
 SessionSelectScreen #rename-input {
-    margin: 1 0 0 0;
-    border: solid $primary 50%;
+    margin: 0;
+    border: none;
+    background: $surface-darken-1;
+    padding: 0 1;
 }
 
 SessionSelectScreen #rename-input:focus {
-    border: solid $primary;
+    border: none;
+    background: $panel-lighten-1 25%;
 }
 
 SessionSelectScreen #session-hint {
-    margin: 1 0 0 0;
+    margin: 0;
+    padding: 0;
     color: $text-muted;
 }
 """

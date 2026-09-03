@@ -30,7 +30,7 @@ def _fmt_duration(seconds: float) -> str:
 
 
 class StatusBar(Static):
-    """Top-of-screen bar showing model, token usage, and processing state.
+    """Bottom bar showing model, token usage, and processing state.
 
     Layout::
 

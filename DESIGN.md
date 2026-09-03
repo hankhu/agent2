@@ -264,7 +264,14 @@ synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
 
 - **回退 (Rewind)**：`rewind(turns)` 按轮次移除最近的 user→assistant 完整对话，`rewind_to(index)` 精确截断到任意历史消息位置。TUI 层在此基础上实现 `/rewind` 命令（回退最近一轮）和消息级 Point Rewind（点击任意消息的 ⏪ 按钮回退到该处）。
 - **分叉 (Fork)**：在 `fork()` 克隆完整 Agent 状态的基础上，TUI 层实现 `/fork` 命令（克隆完整会话）和消息级 Point Fork（从任意历史节点创建新 session 分支）。
-- **UI 交互**：消息选中态（高亮背景 + 双线左指示条）+ 上下文操作按钮（Rewind / Fork），Escape 取消选择。
+- **UI 交互**：消息选中态（高亮色块背景与操作按钮栏，无边框描边）+ 上下文操作按钮（Rewind / Retry / Fork），Escape 取消选择。
+
+### 4.7 TUI 扁平无边框设计与下拉选择器 (Flat Borderless Design & Dropdown)
+
+- **全无边框设计原则**：移除所有 UI 容器、卡片及输入框的实线边框（`border: none`），仅通过背景明暗对比建立视觉层级；清除组件间 padding/margin 产生无缝贴合的现代极简排版。
+- **底部状态栏与流式布局**：取消固定 dock 顶层，将状态栏调整至视窗最下方单行，位于输入区域之下，使用竖向流式布局与 `#messages` (1fr) 协同工作，彻底消除 dock 区域层叠冲突。
+- **下拉式模型选择器**：选用 Textual `Select[str]` 组件实现紧凑 drop-down menu，具备即打即搜能力并兼容自定义模型文本输入，大幅精简模态尺寸。
+
 
 ---
 

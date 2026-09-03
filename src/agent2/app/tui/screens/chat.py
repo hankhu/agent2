@@ -116,7 +116,6 @@ class ChatScreen(Screen):
     ]
 
     def compose(self):  # type: ignore[override]
-        yield StatusBar()
         yield MessageList(id="messages")
         with Vertical(id="input-area"):
             yield OptionList(id="completion-list")
@@ -125,6 +124,7 @@ class ChatScreen(Screen):
                 id="input-hint",
             )
             yield ChatInput(id="chat-input")
+        yield StatusBar()
 
     def on_mount(self) -> None:
         self.query_one("#chat-input", ChatInput).focus()
@@ -154,14 +154,27 @@ class ChatScreen(Screen):
 
     # ── Input handling ──────────────────────────────────────────
 
-    def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
+    async def _mount_and_render_user_message(
+        self, text: str, message_index: int | None = None
+    ) -> UserMessage:
+        """Immediately mount user message into the chat dialog and render before network requests."""
+        messages = self.query_one("#messages", MessageList)
+        user_msg = messages.add_user_message(text, message_index=message_index)
+        await user_msg
+        messages._maybe_scroll_to_bottom()
+        self.refresh(layout=True)
+        if hasattr(self, "_compositor_refresh"):
+            self._compositor_refresh()
+        return user_msg
+
+    async def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         text = event.text
         self._hide_completion()
         messages = self.query_one("#messages", MessageList)
         messages.deselect_all()
 
         if text.startswith("/"):
-            self._handle_command(text)
+            await self._handle_command(text)
             return
 
         app: Agent2App = self.app  # type: ignore[assignment]
@@ -169,8 +182,9 @@ class ChatScreen(Screen):
             app.agent._messages.append(LLMMessage.system(app.agent.system_prompt))
         user_idx = len(app.agent._messages)
 
+        await self._mount_and_render_user_message(text, message_index=user_idx)
+
         if getattr(app, "mode", "agent") == "plan":
-            messages.add_user_message(text, message_index=user_idx)
             if self._pending_plan and is_plan_confirmation(text):
                 plan = self._pending_plan
                 goal = self._plan_goal or plan.goal
@@ -185,8 +199,8 @@ class ChatScreen(Screen):
                 self._run_plan_generation(text)
         else:
             # agent or ask mode
-            messages.add_user_message(text, message_index=user_idx)
             self._run_agent(text)
+
 
     # ── Completion ──────────────────────────────────────────────
 
@@ -501,7 +515,7 @@ class ChatScreen(Screen):
 
     # ── Slash commands ──────────────────────────────────────────
 
-    def _handle_command(self, text: str) -> None:
+    async def _handle_command(self, text: str) -> None:
         from agent2.app.tui.screens.model_select import ModelSelectScreen
 
         parts = text.strip().split(maxsplit=1)
@@ -530,7 +544,7 @@ class ChatScreen(Screen):
         elif cmd == "/plan":
             self._switch_mode("plan")
             if arg:
-                messages.add_user_message(arg)
+                await self._mount_and_render_user_message(arg)
                 self._run_plan_generation(arg)
             else:
                 messages.add_system_message(
@@ -540,7 +554,7 @@ class ChatScreen(Screen):
         elif cmd == "/ask":
             self._switch_mode("ask")
             if arg:
-                messages.add_user_message(arg)
+                await self._mount_and_render_user_message(arg)
                 self._run_agent(arg)
             else:
                 messages.add_system_message(
@@ -550,7 +564,7 @@ class ChatScreen(Screen):
         elif cmd == "/agent":
             self._switch_mode("agent")
             if arg:
-                messages.add_user_message(arg)
+                await self._mount_and_render_user_message(arg)
                 self._run_agent(arg)
             else:
                 messages.add_system_message(
@@ -584,7 +598,9 @@ class ChatScreen(Screen):
             self._save_session()
             self._sync_status_bar()
 
-            messages.add_user_message(last_user_text, message_index=len(app.agent._messages))
+            await self._mount_and_render_user_message(
+                last_user_text, message_index=len(app.agent._messages)
+            )
             messages.add_system_message("🔄 正在重新生成回复...")
             app.session_manager.log_event(
                 app.session_id, "RETRY", f"Retrying user message at index {last_user_idx}"
@@ -601,10 +617,13 @@ class ChatScreen(Screen):
                 return
 
             continue_prompt = arg or "请继续完成上述任务。"
-            messages.add_user_message(continue_prompt, message_index=len(app.agent._messages))
+            await self._mount_and_render_user_message(
+                continue_prompt, message_index=len(app.agent._messages)
+            )
             messages.add_system_message("▶ 继续执行任务...")
             app.session_manager.log_event(app.session_id, "CONTINUE", continue_prompt)
             self._run_agent(continue_prompt)
+
 
         elif cmd == "/rewind":
             if self.query_one(StatusBar).busy:
@@ -862,15 +881,15 @@ class ChatScreen(Screen):
             return
         self._handle_point_rewind(event.message_widget, event.message_index)
 
-    def on_retry_requested(self, event: RetryRequested) -> None:
+    async def on_retry_requested(self, event: RetryRequested) -> None:
         if self.query_one(StatusBar).busy:
             self.query_one("#messages", MessageList).add_system_message(
                 "⚠️ Agent 正在执行中，请先等待或按 Ctrl+C 中断。"
             )
             return
-        self._handle_point_retry(event.message_widget, event.message_index)
+        await self._handle_point_retry(event.message_widget, event.message_index)
 
-    def on_continue_requested(self, event: ContinueRequested) -> None:
+    async def on_continue_requested(self, event: ContinueRequested) -> None:
         if self.query_one(StatusBar).busy:
             self.query_one("#messages", MessageList).add_system_message(
                 "⚠️ Agent 正在执行中，请先等待或按 Ctrl+C 中断。"
@@ -879,10 +898,13 @@ class ChatScreen(Screen):
         app: Agent2App = self.app  # type: ignore[assignment]
         messages = self.query_one("#messages", MessageList)
         continue_prompt = "请继续完成上述任务。"
-        messages.add_user_message(continue_prompt, message_index=len(app.agent._messages))
+        await self._mount_and_render_user_message(
+            continue_prompt, message_index=len(app.agent._messages)
+        )
         messages.add_system_message("▶ 继续执行任务...")
         app.session_manager.log_event(app.session_id, "CONTINUE", continue_prompt)
         self._run_agent(continue_prompt)
+
 
     def on_fork_requested(self, event: ForkRequested) -> None:
         if self.query_one(StatusBar).busy:
@@ -999,7 +1021,7 @@ class ChatScreen(Screen):
                 new_id, "FORK", f"Forked from session at assistant message index {idx}"
             )
 
-    def _handle_point_retry(self, widget: Any, message_index: int | None) -> None:
+    async def _handle_point_retry(self, widget: Any, message_index: int | None) -> None:
         app: Agent2App = self.app  # type: ignore[assignment]
         idx = self._resolve_message_index(widget, message_index)
         if idx is None:
@@ -1015,7 +1037,7 @@ class ChatScreen(Screen):
             self._save_session()
             self._sync_status_bar()
 
-            messages.add_user_message(prompt, message_index=len(app.agent._messages))
+            await self._mount_and_render_user_message(prompt, message_index=len(app.agent._messages))
             messages.add_system_message("🔄 正在重新生成回复...")
             app.session_manager.log_event(
                 app.session_id, "RETRY", f"Retrying user message at index {idx}"
@@ -1039,12 +1061,13 @@ class ChatScreen(Screen):
             self._save_session()
             self._sync_status_bar()
 
-            messages.add_user_message(user_prompt, message_index=len(app.agent._messages))
+            await self._mount_and_render_user_message(user_prompt, message_index=len(app.agent._messages))
             messages.add_system_message("🔄 正在重新生成回复...")
             app.session_manager.log_event(
                 app.session_id, "RETRY", f"Retrying from user message at index {user_idx}"
             )
             self._run_agent(user_prompt)
+
 
 
     # ── Helpers ─────────────────────────────────────────────────

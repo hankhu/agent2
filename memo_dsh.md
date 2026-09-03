@@ -197,3 +197,31 @@
 
 - **测试覆盖**（`tests/test_retry_scroll_limit.py`）：
   - 9 个完整单元与集成测试全部通过，覆盖指令、按钮事件、滚动逻辑、折叠逻辑与轮数限制继续执行。
+
+## 13. 全面扁平化去边框、模型选择 Drop-down Menu、底部状态栏与零衬距贴合布局 (v0.1.3.11)
+
+- **全面去除边框与极简扁平化设计**（`styles.py`）：
+  - 移除 `StatusBar`、`#input-area`、`#chat-input`、`#completion-list` 以及所有弹窗模态（`#model-dialog`、`#session-dialog`）的显式实线边框（`border: none`）。
+  - 移除 `UserMessage`、`AssistantMessage`、`ThinkingBlock`、`ToolCard`、`DiffView`、`ConfirmCard` 等元素的左侧线条指示条，完全依托纯净的背景深浅明暗色块区分层级与选中状态。
+  - 输入框获得焦点时由实线边框改为背景色微亮高亮（`background: $panel 60%`），与现代平铺无边框设计统一。
+
+- **选择列表改为 Drop-down Menu 组件**（`model_select.py`）：
+  - 将原本占用大量画面的 `DataTable` 表格选择列表替换为 Textual 原生下拉选择框组件 [`Select[str]`](file:///Volumes/code/repos/agent2/src/agent2/app/tui/screens/model_select.py)。
+  - 弹窗打开后默认聚焦在下拉框，按 `Enter` 展开下拉选项列表，内置即打即搜（type-to-search）与键盘上下方向键导航。
+  - 支持回车即刻选中并切换模型；同时保留下方自定义模型输入框，兼容任意自定义模型 ID 或别名输入。
+
+- **状态栏移至视窗最下方**（`styles.py`, `chat.py`, `status_bar.py`）：
+  - 改变顶栏悬浮的传统布局，将 `StatusBar` 移至界面最底端（24 行高度下位于 `y=23, height=1`），处于输入框正下方。
+  - 移除原 `dock: top` 设定，采用自然的竖向流式贴底布局（`#messages` 1fr + `#input-area` auto + `StatusBar` 1），杜绝 dock 层叠冲突。
+
+- **输入框、对话框与主窗口零衬距全贴合**（`styles.py`, `model_select.py`, `session_select.py`）：
+  - 消除 `#chat-input` 的左右外边距（`margin: 0`）与 `#input-area` 的底部衬距（`padding: 0`），使输入框完整横向纵向平铺贴满视窗边缘。
+  - 消除 `#messages` 的内衬距（`padding: 0; margin: 0`），消息流内容紧凑贴合两侧与底栏。
+  - 移除弹窗模态内多余的行尾换行符及内衬距，使界面更加平整一体化。
+
+- **用户消息即时挂载渲染**（`chat.py`, `widgets/message_list.py`）：
+  - 用户按下回车后立即完成 DOM 挂载并强制刷新合成器渲染，贴底展示后再触发网络请求，彻底消除网络请求初期的延迟感。
+
+- **测试覆盖**（`tests/test_model_select_flat.py`, `tests/test_retry_scroll_limit.py`）：
+  - 新增测试覆盖无边框 CSS 有效性、`Select` 下拉菜单展开与选取、自定义模型输入、取消操作及状态栏底部定位校验。全量 91 项测试全部通过。
+
