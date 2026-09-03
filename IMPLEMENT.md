@@ -439,6 +439,15 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
   - `ToolCard` 中的工具执行结果面板（`.tool-result`）统一默认呈折叠状态（`collapsed=True`），边距紧凑化（`padding: 0 1; margin: 0;`），避免大量工具输出占用过多屏幕空间。
   - `ChatScreen` 注册全局快捷键 `Ctrl+O`（`action_toggle_tool_results`），一键批量展开或收起所有工具执行结果面板。
 
+### 6.15 消息级 Point Rewind / Fork 与 SelectableMessage 体系 (`message_list.py` / `screens/chat.py`)
+
+- **`SelectableMessage` 基类**：`UserMessage` 和 `AssistantMessage` 继承自 `SelectableMessage(Vertical)`，支持 `can_focus=True`、点击/焦点触发 `select()` 排他选中、挂载 `⏪ Rewind` 和 `🍴 Fork` 操作按钮。
+- **事件解耦**：按钮点击通过 `RewindRequested` / `ForkRequested` 自定义 Textual `Message` 事件冒泡至 `ChatScreen`，事件携带 `message_widget` 引用与 `message_index` 索引。
+- **索引解析容错 (`_resolve_message_index`)**：优先使用挂载时记录的 `message_index`；若索引失效（历史被修改），退化为按内容反向匹配 `agent._messages`，保证健壮性。
+- **Rewind 语义区分**：UserMessage 上 Rewind 移除该消息及之后所有消息（`rewind_to(idx, inclusive=False)`），并将用户文本填入输入框；AssistantMessage 上 Rewind 保留该回复（`rewind_to(idx, inclusive=True)`），截断后续对话。
+- **Fork 语义区分**：UserMessage 上 Fork 截取该消息之前的历史创建新 session；AssistantMessage 上 Fork 截取到该回复（含）的历史创建新 session。
+- **选中态样式**：选中消息高亮背景 + `border-left: double` 双线指示条；`.message-actions` 按钮栏默认 `display: none`，选中或 `focus-within` 时 `display: block`。
+
 ---
 
 ## 7. 异步设计

@@ -126,6 +126,60 @@ class BaseAgent(ABC):
         new_agent._messages = [m.model_copy(deep=True) for m in self._messages]
         return new_agent
 
+    def rewind(self, turns: int = 1) -> list[Message]:
+        """Rewind the conversation history by a given number of turns (default 1).
+
+        A turn starts with a user message and includes all subsequent assistant
+        responses and tool executions.
+
+        Parameters
+        ----------
+        turns : int
+            Number of turns to rewind. Defaults to 1.
+
+        Returns
+        -------
+        list[Message]
+            The messages that were removed.
+        """
+        if turns < 1:
+            return []
+        removed: list[Message] = []
+        for _ in range(turns):
+            last_user_idx = None
+            for i in range(len(self._messages) - 1, -1, -1):
+                if self._messages[i].role == Role.USER:
+                    last_user_idx = i
+                    break
+            if last_user_idx is None:
+                break
+            removed = self._messages[last_user_idx:] + removed
+            self._messages = self._messages[:last_user_idx]
+        return removed
+
+    def rewind_to(self, index: int, *, inclusive: bool = False) -> list[Message]:
+        """Rewind conversation history to a specific message index.
+
+        Parameters
+        ----------
+        index : int
+            The target message index in ``self._messages``.
+        inclusive : bool
+            If True, keep the message at index and remove messages after it.
+            If False, remove the message at index and all messages after it.
+
+        Returns
+        -------
+        list[Message]
+            The messages that were removed.
+        """
+        cutoff = index + 1 if inclusive else index
+        if cutoff < 0 or cutoff >= len(self._messages):
+            return []
+        removed = self._messages[cutoff:]
+        self._messages = self._messages[:cutoff]
+        return removed
+
     # ── Serialization & Persistence ─────────────────────────────────
 
     def _get_extra_state(self) -> dict[str, Any]:

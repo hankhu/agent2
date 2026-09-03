@@ -125,3 +125,46 @@
 - 新增 `ChatScreen._session_has_input()`（agent 历史中是否存在 user 消息）与 `_save_session()`（无输入则跳过保存）。
 - 所有保存入口统一走守卫：`_run_agent` 自动保存、`/new` 切换前保存、`/rename`、`/exit`、`Ctrl+D` 退出。打开应用从不发送消息就退出 / 立即 `/new`，不再产生只有 system prompt 的空会话记录；`/rename` 空会话会提示"当前会话还没有内容，暂不保存"。
 - 恢复的会话（含 user 消息）与失败/中断回合照常保存。
+
+## 11. Rewind & Fork — 消息级回退/分叉交互 (v0.1.3.9)
+
+- **BaseAgent 新增 `rewind()` / `rewind_to()` 方法**（`agent/base.py`）
+  - `rewind(turns)`：按轮次回退对话历史，一轮从 user message 开始包含后续 assistant/tool messages。
+  - `rewind_to(index, inclusive)`：回退到指定消息索引，`inclusive=True` 保留该消息，`False` 移除该消息及之后所有消息。
+  - 两个方法均返回被移除的消息列表。
+
+- **`TUIReActAgent.fork()` 覆写**（`app/tui/app.py`）
+  - 覆写 `fork()` 确保克隆 agent 时复制 `_auto_approved`、`approval_callback`、`mode` 等 TUI 特有状态。
+
+- **`/rewind` 命令**（`screens/chat.py`）
+  - 回退最近一轮对话（最后一个 user message 及其后续 assistant 回复），将被回退的用户输入填入输入框。
+  - 执行前检查 agent 是否繁忙，繁忙时提示等待。
+
+- **`/fork [title]` 命令**（`screens/chat.py`）
+  - 克隆当前完整会话为新 session（生成新 session ID），后续对话在新 session 中继续。
+  - 支持可选参数指定 fork 后的会话标题。
+
+- **消息级 Point Rewind / Fork 交互**（`screens/chat.py` + `widgets/message_list.py` + `styles.py`）
+  - `SelectableMessage` 基类：消息支持点击/焦点选中，选中后高亮并显示 `⏪ Rewind` 和 `🍴 Fork` 操作按钮。
+  - 在 `UserMessage` 上 Rewind：回退到该消息之前，将该消息内容填入输入框。
+  - 在 `AssistantMessage` 上 Rewind：回退到该回复（保留该回复），后续对话从此处继续。
+  - 在 `UserMessage` 上 Fork：创建新 session，保留该消息之前的历史，将该消息填入输入框。
+  - 在 `AssistantMessage` 上 Fork：创建新 session，保留到该回复为止的完整历史。
+  - `RewindRequested` / `ForkRequested` 自定义 Textual Message 事件。
+  - Escape 键取消选择并返回焦点到输入框。
+
+- **选中态 UI 样式**（`styles.py`）
+  - `UserMessage` / `AssistantMessage` 选中态：高亮背景 + 左侧双线指示条。
+  - `.message-actions` 按钮栏：默认隐藏，选中或聚焦时显示。
+  - 按钮样式：扁平透明底色，hover/focus 时高亮。
+
+- **测试覆盖**（`tests/test_rewind_fork.py`）
+  - 新增 9 个测试：`BaseAgent` rewind/rewind_to 单元测试 + TUI 级 point rewind/fork 集成测试。
+
+- **主要涉及文件**：
+  - `src/agent2/agent/base.py`
+  - `src/agent2/app/tui/app.py`
+  - `src/agent2/app/tui/screens/chat.py`
+  - `src/agent2/app/tui/styles.py`
+  - `src/agent2/app/tui/widgets/message_list.py`
+  - `tests/test_rewind_fork.py`

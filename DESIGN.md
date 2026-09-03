@@ -260,6 +260,12 @@ synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
 - **模式生命周期**：`ChatScreen` 与 `Agent2App` 协同维护当前活动模式。在 Plan 模式下保持临时未确认计划草稿 (`_pending_plan`)；用户确认后状态机原子转换回缺省 Agent 模式。
 - **子任务执行上下文隔离**：每个子任务派发时采用专职 `SubAgent` 实例，不共享主 Agent 的多轮对话上下文 `_messages`，仅显式透传其依赖项结果，从根本上防止多步骤任务导致的上下文过载与噪声干扰。
 
+### 4.6 对话回退与分叉 (Rewind & Fork)
+
+- **回退 (Rewind)**：`rewind(turns)` 按轮次移除最近的 user→assistant 完整对话，`rewind_to(index)` 精确截断到任意历史消息位置。TUI 层在此基础上实现 `/rewind` 命令（回退最近一轮）和消息级 Point Rewind（点击任意消息的 ⏪ 按钮回退到该处）。
+- **分叉 (Fork)**：在 `fork()` 克隆完整 Agent 状态的基础上，TUI 层实现 `/fork` 命令（克隆完整会话）和消息级 Point Fork（从任意历史节点创建新 session 分支）。
+- **UI 交互**：消息选中态（高亮背景 + 双线左指示条）+ 上下文操作按钮（Rewind / Fork），Escape 取消选择。
+
 ---
 
 ## 5. 配置层次设计

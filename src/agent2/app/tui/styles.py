@@ -36,11 +36,67 @@ UserMessage {
     height: auto;
 }
 
+UserMessage.selected {
+    background: $panel 60%;
+    border-left: double $primary;
+}
+
 AssistantMessage {
     margin: 1 0 0 0;
     padding: 1 1;
     background: transparent;
     height: auto;
+}
+
+AssistantMessage.selected {
+    background: $panel 25%;
+    border-left: double $secondary;
+}
+
+.message-actions {
+    display: none;
+    height: 1;
+    min-height: 1;
+    margin-top: 1;
+    align-horizontal: right;
+}
+
+UserMessage.selected .message-actions {
+    display: block;
+}
+
+AssistantMessage.selected .message-actions {
+    display: block;
+}
+
+UserMessage:focus-within .message-actions {
+    display: block;
+}
+
+AssistantMessage:focus-within .message-actions {
+    display: block;
+}
+
+.message-actions Button {
+    background: $panel 70%;
+    border: none;
+    height: 1;
+    min-height: 1;
+    min-width: 10;
+    padding: 0 1;
+    margin-left: 1;
+    color: $text-muted;
+}
+
+.message-actions Button:hover {
+    background: $primary 40%;
+    color: $text;
+}
+
+.message-actions Button:focus {
+    background: $primary 70%;
+    color: $text;
+    text-style: bold;
 }
 
 SystemMessage {

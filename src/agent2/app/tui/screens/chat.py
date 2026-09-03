@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,7 +27,13 @@ from agent2.app.tui.planner import (
     topological_sort_tasks,
 )
 from agent2.app.tui.widgets.input_area import ChatInput
-from agent2.app.tui.widgets.message_list import MessageList
+from agent2.app.tui.widgets.message_list import (
+    AssistantMessage,
+    ForkRequested,
+    MessageList,
+    RewindRequested,
+    UserMessage,
+)
 from agent2.app.tui.widgets.status_bar import StatusBar
 
 if TYPE_CHECKING:
@@ -42,6 +49,8 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/model", "Switch LLM model"),
     ("/models", "Alias for /model"),
     ("/clear", "Clear display"),
+    ("/rewind", "Rewind to previous conversation round"),
+    ("/fork", "Fork current session and continue (/fork [title])"),
     ("/new", "Start new session"),
     ("/resume", "Resume saved session"),
     ("/sessions", "List & manage sessions (resume/rename/delete)"),
@@ -99,6 +108,7 @@ class ChatScreen(Screen):
         Binding("ctrl+c", "interrupt", "Interrupt", priority=True),
         Binding("ctrl+o", "toggle_tool_results", "Toggle Results", priority=True),
         Binding("ctrl+d", "quit_app", "Quit", priority=True),
+        Binding("escape", "cancel_selection", "Cancel Selection", priority=False),
     ]
 
     def compose(self):  # type: ignore[override]
@@ -143,16 +153,20 @@ class ChatScreen(Screen):
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         text = event.text
         self._hide_completion()
+        messages = self.query_one("#messages", MessageList)
+        messages.deselect_all()
 
         if text.startswith("/"):
             self._handle_command(text)
             return
 
         app: Agent2App = self.app  # type: ignore[assignment]
-        messages = self.query_one("#messages", MessageList)
+        if not app.agent._messages and app.agent.system_prompt:
+            app.agent._messages.append(LLMMessage.system(app.agent.system_prompt))
+        user_idx = len(app.agent._messages)
 
         if getattr(app, "mode", "agent") == "plan":
-            messages.add_user_message(text)
+            messages.add_user_message(text, message_index=user_idx)
             if self._pending_plan and is_plan_confirmation(text):
                 plan = self._pending_plan
                 goal = self._plan_goal or plan.goal
@@ -167,7 +181,7 @@ class ChatScreen(Screen):
                 self._run_plan_generation(text)
         else:
             # agent or ask mode
-            messages.add_user_message(text)
+            messages.add_user_message(text, message_index=user_idx)
             self._run_agent(text)
 
     # ── Completion ──────────────────────────────────────────────
@@ -279,7 +293,7 @@ class ChatScreen(Screen):
             # reads don't delay the user message from appearing.
             processed = await asyncio.to_thread(_process_context, text)
             result = await agent.chat(processed)
-            messages.add_assistant_message(result)
+            messages.add_assistant_message(result, message_index=len(agent._messages) - 1)
             app.session_manager.log_event(app.session_id, "ASSISTANT", result)
             self._sync_status_bar()
         except asyncio.CancelledError:
@@ -542,6 +556,67 @@ class ChatScreen(Screen):
             messages.clear_messages()
             messages.add_system_message("🧹 Display cleared.")
 
+        elif cmd == "/rewind":
+            if self.query_one(StatusBar).busy:
+                messages.add_system_message("⚠️ Agent 正在执行中，请先等待或按 Ctrl+C 中断。")
+                return
+
+            user_indices = [
+                i for i, m in enumerate(app.agent._messages)
+                if m.role == Role.USER
+            ]
+            if not user_indices:
+                messages.add_system_message("⚠️ 当前会话没有可回退的对话轮次。")
+                return
+
+            last_user_idx = user_indices[-1]
+            last_user_msg = app.agent._messages[last_user_idx]
+            last_user_text = last_user_msg.content or ""
+
+            app.agent.rewind(1)
+            messages.clear_messages()
+            self._rebuild_messages()
+
+            chat_input = self.query_one("#chat-input", ChatInput)
+            chat_input.clear()
+            if last_user_text:
+                chat_input.insert(last_user_text)
+            chat_input.focus()
+
+            self._save_session()
+            self._sync_status_bar()
+            messages.add_system_message("⏪ 已回退到上一轮对话。")
+            app.session_manager.log_event(
+                app.session_id, "REWIND", f"Rewound to previous round (index {last_user_idx})"
+            )
+
+        elif cmd == "/fork":
+            if self.query_one(StatusBar).busy:
+                messages.add_system_message("⚠️ Agent 正在执行中，请先等待或按 Ctrl+C 中断。")
+                return
+
+            if not self._session_has_input():
+                messages.add_system_message("当前会话还没有内容，无法 fork。")
+                return
+
+            self._save_session()
+            new_id = uuid.uuid4().hex[:8]
+            new_title = arg.strip() if arg else f"{app.session_title or 'Session'} (fork)"
+            new_agent = app.agent.fork()
+
+            app.session_id = new_id
+            app.session_title = new_title
+            app.agent = new_agent
+            app.session_manager.save(new_id, app.agent.to_dict(), title=new_title)
+
+            messages.add_system_message(
+                f"🍴 已克隆当前对话为新会话 [bold cyan]{new_id}[/bold cyan] ({new_title})，后续对话将在此继续。"
+            )
+            self._sync_status_bar()
+            app.session_manager.log_event(
+                new_id, "FORK", f"Forked full conversation from previous session"
+            )
+
         elif cmd == "/new":
             self._save_session()
             app.agent.reset()
@@ -604,6 +679,8 @@ class ChatScreen(Screen):
                 "\n[bold cyan]Commands[/bold cyan]\n"
                 "  /model [name]   Switch model\n"
                 "  /clear          Clear display\n"
+                "  /rewind         Rewind to previous round\n"
+                "  /fork [title]   Fork current session and continue\n"
                 "  /new            New session\n"
                 "  /sessions       List & manage sessions (resume/rename/delete)\n"
                 "  /resume [id]    Resume session\n"
@@ -680,13 +757,19 @@ class ChatScreen(Screen):
         """Re-populate the message list from the agent's history."""
         app: Agent2App = self.app  # type: ignore[assignment]
         messages = self.query_one("#messages", MessageList)
-        for msg in app.agent.messages:
+        for idx, msg in enumerate(app.agent.messages):
             if msg.role == Role.USER:
-                messages.add_user_message(msg.content or "")
+                messages.add_user_message(msg.content or "", message_index=idx)
             elif msg.role == Role.ASSISTANT:
-                messages.add_assistant_message(msg.content or "")
+                messages.add_assistant_message(msg.content or "", message_index=idx)
 
-    # ── Interrupt / Quit ────────────────────────────────────────
+    # ── Interrupt / Quit / Selection ────────────────────────────
+
+    def action_cancel_selection(self) -> None:
+        """Escape: clear message selection and return focus to chat input."""
+        messages = self.query_one("#messages", MessageList)
+        messages.deselect_all()
+        self.query_one("#chat-input", ChatInput).focus()
 
     def action_interrupt(self) -> None:
         """Ctrl+C: cancel the running agent worker (does not exit)."""
@@ -716,6 +799,131 @@ class ChatScreen(Screen):
                 title=app.session_title or "",
             )
         self.app.exit()
+
+    # ── Point Rewind & Fork event handlers ──────────────────────
+
+    def on_rewind_requested(self, event: RewindRequested) -> None:
+        if self.query_one(StatusBar).busy:
+            self.query_one("#messages", MessageList).add_system_message(
+                "⚠️ Agent 正在执行中，请先等待或按 Ctrl+C 中断。"
+            )
+            return
+        self._handle_point_rewind(event.message_widget, event.message_index)
+
+    def on_fork_requested(self, event: ForkRequested) -> None:
+        if self.query_one(StatusBar).busy:
+            self.query_one("#messages", MessageList).add_system_message(
+                "⚠️ Agent 正在执行中，请先等待或按 Ctrl+C 中断。"
+            )
+            return
+        self._handle_point_fork(event.message_widget, event.message_index)
+
+    def _resolve_message_index(self, widget: Any, message_index: int | None) -> int | None:
+        app: Agent2App = self.app  # type: ignore[assignment]
+        msgs = app.agent._messages
+        if message_index is not None and 0 <= message_index < len(msgs):
+            return message_index
+
+        if isinstance(widget, UserMessage):
+            for i in range(len(msgs) - 1, -1, -1):
+                if msgs[i].role == Role.USER and msgs[i].content == widget._text:
+                    return i
+        elif isinstance(widget, AssistantMessage):
+            for i in range(len(msgs) - 1, -1, -1):
+                if msgs[i].role == Role.ASSISTANT and msgs[i].content == widget._content:
+                    return i
+        return None
+
+    def _handle_point_rewind(self, widget: Any, message_index: int | None) -> None:
+        app: Agent2App = self.app  # type: ignore[assignment]
+        idx = self._resolve_message_index(widget, message_index)
+        if idx is None:
+            return
+
+        messages = self.query_one("#messages", MessageList)
+        chat_input = self.query_one("#chat-input", ChatInput)
+
+        if isinstance(widget, UserMessage):
+            app.agent.rewind_to(idx, inclusive=False)
+            chat_input.clear()
+            if widget._text:
+                chat_input.insert(widget._text)
+            chat_input.focus()
+            messages.clear_messages()
+            self._rebuild_messages()
+            self._save_session()
+            self._sync_status_bar()
+            messages.add_system_message("⏪ 已回退至该消息之前，已将内容填入输入框。")
+            app.session_manager.log_event(
+                app.session_id, "REWIND", f"Rewound to before user message at index {idx}"
+            )
+        elif isinstance(widget, AssistantMessage):
+            app.agent.rewind_to(idx, inclusive=True)
+            messages.clear_messages()
+            self._rebuild_messages()
+            self._save_session()
+            self._sync_status_bar()
+            chat_input.focus()
+            messages.add_system_message("⏪ 已回退至该助手回复。")
+            app.session_manager.log_event(
+                app.session_id, "REWIND", f"Rewound to assistant message at index {idx}"
+            )
+
+    def _handle_point_fork(self, widget: Any, message_index: int | None) -> None:
+        app: Agent2App = self.app  # type: ignore[assignment]
+        idx = self._resolve_message_index(widget, message_index)
+        if idx is None:
+            return
+
+        self._save_session()
+
+        messages = self.query_one("#messages", MessageList)
+        chat_input = self.query_one("#chat-input", ChatInput)
+        new_agent = app.agent.fork()
+        new_id = uuid.uuid4().hex[:8]
+        new_title = f"{app.session_title or 'Session'} (fork)"
+
+        if isinstance(widget, UserMessage):
+            new_agent._messages = [
+                m.model_copy(deep=True) for m in app.agent._messages[:idx]
+            ]
+            app.session_id = new_id
+            app.session_title = new_title
+            app.agent = new_agent
+            app.session_manager.save(new_id, app.agent.to_dict(), title=new_title)
+
+            messages.clear_messages()
+            self._rebuild_messages()
+            chat_input.clear()
+            if widget._text:
+                chat_input.insert(widget._text)
+            chat_input.focus()
+            messages.add_system_message(
+                f"🍴 已从该节点克隆为新会话 [bold cyan]{new_id}[/bold cyan] ({new_title})，已将该消息填入输入框。"
+            )
+            self._sync_status_bar()
+            app.session_manager.log_event(
+                new_id, "FORK", f"Forked from session before user message at index {idx}"
+            )
+        elif isinstance(widget, AssistantMessage):
+            new_agent._messages = [
+                m.model_copy(deep=True) for m in app.agent._messages[:idx + 1]
+            ]
+            app.session_id = new_id
+            app.session_title = new_title
+            app.agent = new_agent
+            app.session_manager.save(new_id, app.agent.to_dict(), title=new_title)
+
+            messages.clear_messages()
+            self._rebuild_messages()
+            chat_input.focus()
+            messages.add_system_message(
+                f"🍴 已从该节点克隆为新会话 [bold cyan]{new_id}[/bold cyan] ({new_title})，后续对话将在此继续。"
+            )
+            self._sync_status_bar()
+            app.session_manager.log_event(
+                new_id, "FORK", f"Forked from session at assistant message index {idx}"
+            )
 
 
     # ── Helpers ─────────────────────────────────────────────────

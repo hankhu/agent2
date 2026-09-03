@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.3.8 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.9 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -34,6 +34,7 @@
 - 所有 Agent 的公共基类，管理 LLM、ToolRegistry、消息历史、日志。
 - **多轮对话** — `chat()` 保持上下文；`run()` 重置后单次执行。
 - **状态管理** — `set_rule()`（动态修改 system prompt）、`reset()`（清空历史）、`fork()`（独立克隆含完整状态）。
+- **对话回退** — `rewind(turns)` 按轮次回退对话历史并返回被移除消息；`rewind_to(index, inclusive)` 精确回退到指定消息索引。
 - **工具调用容错与自愈** — `_execute_tool_calls()` 异常防护确保必然生成 tool result；`_repair_tool_messages()` 恢复时与入参时自动补齐断裂历史。
 - **序列化/持久化** — `to_dict()` / `to_json()` / `save()` 序列化；`from_dict()` / `from_json()` / `load()` 反序列化，自动解析 Agent 子类和内置工具并修复历史。
 - **安全限制** — `MaxIterationsExceeded` 防止无限循环。
@@ -164,6 +165,8 @@
   - **工具执行结果面板折叠与快捷切换 (`ToolCard` / `Ctrl+O`)**：
     - 工具执行结果面板（Result Panel）默认折叠展示（`collapsed=True`），边距紧凑无冗余空白。
     - 全局快捷键 `Ctrl+O` 一键批量展开 / 收起所有工具执行结果面板。
+  - **对话回退与分叉 (`/rewind` / `/fork`)** — `/rewind` 回退最近一轮对话并将用户输入填回输入框；`/fork [title]` 克隆当前完整会话为新 session 继续对话。
+  - **消息级 Point Rewind / Fork 交互** — 点击或焦点选中任意历史消息，显示 `⏪ Rewind` 和 `🍴 Fork` 操作按钮。在 UserMessage 上回退/分叉到该消息之前；在 AssistantMessage 上回退/分叉到该回复处。Escape 取消选择。
   - **输入历史导航 (`ChatInput`)** — 方向键 ↑ / ↓ 快速浏览和填充历史用户输入，保留草稿编辑状态。
   - **会话标题智能清洗** — 自动剔除 `<file>`、`<directory>` 等注入的上下文标签，保持会话列表标题整洁。
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any
+from typing import Any, Self
 
 from textual.app import App
 
@@ -52,6 +52,13 @@ class TUIReActAgent(ReActAgent):
         elif mode == "agent":
             if self.system_prompt == ASK_SYSTEM_MSG:
                 self.set_rule(DEFAULT_SYSTEM_MSG)
+
+    def fork(self, name: str | None = None) -> Self:
+        new_agent = super().fork(name=name)
+        new_agent._auto_approved = set(self._auto_approved)
+        new_agent.approval_callback = self.approval_callback
+        new_agent.mode = self.mode
+        return new_agent
 
     async def _run_loop(self) -> str:
         """Execute ReAct loop with mode-filtered tool schemas."""
