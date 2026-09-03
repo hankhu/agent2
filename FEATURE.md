@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.3.9 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.10 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -166,7 +166,11 @@
     - 工具执行结果面板（Result Panel）默认折叠展示（`collapsed=True`），边距紧凑无冗余空白。
     - 全局快捷键 `Ctrl+O` 一键批量展开 / 收起所有工具执行结果面板。
   - **对话回退与分叉 (`/rewind` / `/fork`)** — `/rewind` 回退最近一轮对话并将用户输入填回输入框；`/fork [title]` 克隆当前完整会话为新 session 继续对话。
-  - **消息级 Point Rewind / Fork 交互** — 点击或焦点选中任意历史消息，显示 `⏪ Rewind` 和 `🍴 Fork` 操作按钮。在 UserMessage 上回退/分叉到该消息之前；在 AssistantMessage 上回退/分叉到该回复处。Escape 取消选择。
+  - **消息级 Point Rewind / Fork / Retry 交互** — 点击或焦点选中任意历史消息，显示 `⏪ Rewind`、`🔄 Retry` 和 `🍴 Fork` 操作按钮。在 UserMessage 上回退/重试/分叉到该消息之前；在 AssistantMessage 上回退/重试/分叉到该回复处。Escape 取消选择。
+  - **指令重试与继续 (`/retry` / `/continue`)** — `/retry` 重发最后一轮用户提问；`/continue` 一键唤醒 Agent 继续完成未完任务。
+  - **平滑贴底自动滚动 (Sticky Scroll)** — 未主动向上翻看时新消息自动滚到底部，翻看历史时不强制拉回，滚回底部自动恢复贴底。
+  - **代码块与大段文字折叠 (Collapsible Folding)** — 助手消息中代码块（>=4行）与大段文字（>=8行/400字符）自动折叠为 Collapsible；`file_write` Diff 预览（>=6行）折叠展示；`Ctrl+O` 一键切换展开/收起。
+  - **最大轮数限制无缝继续** — ReAct loop 达到 `max_iterations` 时触发 HITL 继续审批弹窗，确认后追加轮数无缝继续执行；达到上限停止后提供 `▶ Continue` 按钮。
   - **输入历史导航 (`ChatInput`)** — 方向键 ↑ / ↓ 快速浏览和填充历史用户输入，保留草稿编辑状态。
   - **会话标题智能清洗** — 自动剔除 `<file>`、`<directory>` 等注入的上下文标签，保持会话列表标题整洁。
 

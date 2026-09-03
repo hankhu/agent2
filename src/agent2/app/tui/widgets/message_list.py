@@ -24,6 +24,24 @@ class RewindRequested(Message):
         self.message_index = message_index
 
 
+class RetryRequested(Message):
+    """Event posted when the user clicks the Retry button on a message."""
+
+    def __init__(self, message_widget: SelectableMessage, message_index: int | None = None) -> None:
+        super().__init__()
+        self.message_widget = message_widget
+        self.message_index = message_index
+
+
+class ContinueRequested(Message):
+    """Event posted when the user clicks the Continue button on a message."""
+
+    def __init__(self, message_widget: SelectableMessage, message_index: int | None = None) -> None:
+        super().__init__()
+        self.message_widget = message_widget
+        self.message_index = message_index
+
+
 class ForkRequested(Message):
     """Event posted when the user clicks the Fork button on a message."""
 
@@ -39,22 +57,36 @@ class ForkRequested(Message):
 class MessageList(ScrollableContainer):
     """Vertically scrollable container for conversation messages."""
 
+    def on_mount(self) -> None:
+        self.anchor(True)
+
+    def _maybe_scroll_to_bottom(self) -> None:
+        """Scroll to the bottom if the user hasn't actively scrolled away."""
+        if not self._anchor_released or self.is_vertical_scroll_end:
+            self.scroll_end(animate=False)
+
     def add_user_message(self, text: str, message_index: int | None = None) -> UserMessage:
         msg = UserMessage(text, message_index=message_index)
         self.mount(msg)
-        msg.scroll_visible()
+        self._anchor_released = False
+        self.scroll_end(animate=False)
         return msg
 
-    def add_assistant_message(self, content: str, message_index: int | None = None) -> AssistantMessage:
-        msg = AssistantMessage(content, message_index=message_index)
+    def add_assistant_message(
+        self,
+        content: str,
+        message_index: int | None = None,
+        can_continue: bool = False,
+    ) -> AssistantMessage:
+        msg = AssistantMessage(content, message_index=message_index, can_continue=can_continue)
         self.mount(msg)
-        msg.scroll_visible()
+        self._maybe_scroll_to_bottom()
         return msg
 
     def add_system_message(self, text: str) -> SystemMessage:
         msg = SystemMessage(text)
         self.mount(msg)
-        msg.scroll_visible()
+        self._maybe_scroll_to_bottom()
         return msg
 
     def add_thinking_block(
@@ -65,13 +97,13 @@ class MessageList(ScrollableContainer):
     ) -> ThinkingBlock:
         block = ThinkingBlock(content, step, elapsed)
         self.mount(block)
-        block.scroll_visible()
+        self._maybe_scroll_to_bottom()
         return block
 
     def add_tool_card(self, tool_name: str, arguments: dict) -> ToolCard:  # type: ignore[type-arg]
         card = ToolCard(tool_name, arguments)
         self.mount(card)
-        card.scroll_visible()
+        self._maybe_scroll_to_bottom()
         return card
 
     def add_confirm_card(
@@ -82,7 +114,7 @@ class MessageList(ScrollableContainer):
     ) -> ConfirmCard:
         card = ConfirmCard(tool_name, arguments, on_decision=on_decision)
         self.mount(card)
-        card.scroll_visible()
+        self._maybe_scroll_to_bottom()
         return card
 
     def deselect_all(self) -> None:
@@ -100,7 +132,7 @@ class MessageList(ScrollableContainer):
 
 
 class SelectableMessage(Vertical):
-    """Base class for selectable messages with Rewind and Fork action buttons."""
+    """Base class for selectable messages with action buttons."""
 
     can_focus = True
 
@@ -126,6 +158,10 @@ class SelectableMessage(Vertical):
         event.stop()
         if "btn-rewind" in event.button.classes:
             self.post_message(RewindRequested(self, self.message_index))
+        elif "btn-retry" in event.button.classes:
+            self.post_message(RetryRequested(self, self.message_index))
+        elif "btn-continue" in event.button.classes:
+            self.post_message(ContinueRequested(self, self.message_index))
         elif "btn-fork" in event.button.classes:
             self.post_message(ForkRequested(self, self.message_index))
 
@@ -142,22 +178,100 @@ class UserMessage(SelectableMessage):
         yield Static(self._text)
         with Horizontal(classes="message-actions"):
             yield Button("⏪ Rewind", classes="btn-action btn-rewind")
+            yield Button("🔄 Retry", classes="btn-action btn-retry")
             yield Button("🍴 Fork", classes="btn-action btn-fork")
+
+
+import re
+
+_CODE_BLOCK_RE = re.compile(r"```([a-zA-Z0-9_-]*)\n(.*?)```", re.DOTALL)
 
 
 class AssistantMessage(SelectableMessage):
-    """An assistant response rendered as Markdown."""
+    """An assistant response rendered as Markdown with folded code blocks and long text."""
 
-    def __init__(self, content: str, message_index: int | None = None) -> None:
+    def __init__(
+        self,
+        content: str,
+        message_index: int | None = None,
+        can_continue: bool = False,
+    ) -> None:
         super().__init__(message_index=message_index)
         self._content = content
+        self._can_continue = can_continue or _is_max_iterations_content(content)
 
     def compose(self):  # type: ignore[override]
         yield Static("[bold green]Agent[/bold green]")
-        yield Markdown(self._content)
+        yield from self._compose_content()
         with Horizontal(classes="message-actions"):
             yield Button("⏪ Rewind", classes="btn-action btn-rewind")
+            yield Button("🔄 Retry", classes="btn-action btn-retry")
+            if self._can_continue:
+                yield Button("▶ Continue", classes="btn-action btn-continue")
             yield Button("🍴 Fork", classes="btn-action btn-fork")
+
+    def _compose_content(self):
+        """Yield markdown or collapsible widgets for code blocks and large text paragraphs."""
+        segments = _split_markdown_segments(self._content)
+        if not segments:
+            yield Markdown(self._content)
+            return
+
+        for seg_type, text, lang in segments:
+            if seg_type == "code":
+                lines = text.strip().splitlines()
+                # Fold code blocks with >= 4 lines
+                if len(lines) >= 4:
+                    title = f"📦 Code ({lang or 'code'}, {len(lines)} lines)"
+                    yield Collapsible(
+                        Markdown(f"```{lang}\n{text}\n```"),
+                        title=title,
+                        collapsed=True,
+                        classes="content-collapse",
+                    )
+                else:
+                    yield Markdown(f"```{lang}\n{text}\n```")
+            else:
+                lines = [l for l in text.strip().splitlines() if l.strip()]
+                # Fold large text paragraphs (>= 8 lines or >= 400 chars)
+                if len(lines) >= 8 or len(text.strip()) >= 400:
+                    summary = lines[0][:40].strip() if lines else "Text"
+                    title = f"📄 Text ({len(lines)} lines) — {summary}…"
+                    yield Collapsible(
+                        Markdown(text.strip()),
+                        title=title,
+                        collapsed=True,
+                        classes="content-collapse",
+                    )
+                else:
+                    yield Markdown(text)
+
+
+def _is_max_iterations_content(content: str) -> bool:
+    """Check if content indicates conversation reached max iteration limit."""
+    kw = ("exceeded", "within", "unable to complete the task within", "最大轮数", "最大迭代", "达到最大")
+    return any(k in content for k in kw) and ("step" in content or "iteration" in content or "轮" in content)
+
+
+def _split_markdown_segments(content: str) -> list[tuple[str, str, str]]:
+    """Split markdown into text and code segments: (type, text, lang)."""
+    segments: list[tuple[str, str, str]] = []
+    last_end = 0
+    for match in _CODE_BLOCK_RE.finditer(content):
+        start, end = match.span()
+        if start > last_end:
+            text_part = content[last_end:start]
+            if text_part.strip():
+                segments.append(("text", text_part, ""))
+        lang = match.group(1).strip()
+        code = match.group(2)
+        segments.append(("code", code, lang))
+        last_end = end
+    if last_end < len(content):
+        text_part = content[last_end:]
+        if text_part.strip():
+            segments.append(("text", text_part, ""))
+    return segments
 
 
 class SystemMessage(Static):

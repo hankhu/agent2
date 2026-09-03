@@ -73,7 +73,9 @@ class TUIReActAgent(ReActAgent):
         else:
             tool_schemas = all_schemas or None
 
-        for iteration in range(1, self.max_iterations + 1):
+        iteration = 0
+        while True:
+            iteration += 1
             response = await self.llm.chat(
                 self._messages,
                 tools=tool_schemas,
@@ -85,15 +87,32 @@ class TUIReActAgent(ReActAgent):
                 self._messages.append(response.message)
                 tool_results = await self._execute_tool_calls(response.tool_calls)
                 self._messages.extend(tool_results)
+
+                # Check if reached iteration limit
+                if iteration % self.max_iterations == 0:
+                    if "max_iterations" in self._auto_approved:
+                        continue
+                    if self.approval_callback is not None:
+                        class _MaxIterationsPrompt:
+                            name = "max_iterations"
+                            arguments = {"rounds": iteration}
+
+                        decision = await self.approval_callback(_MaxIterationsPrompt())
+                        if decision == "always":
+                            self._auto_approved.add("max_iterations")
+                        if decision in ("approve", "always", "continue"):
+                            self.log.observation(
+                                f"User allowed continuing execution after {iteration} iterations."
+                            )
+                            continue
+                    raise MaxIterationsExceeded(
+                        f"Agent '{self.name}' exceeded {iteration} iterations"
+                    )
                 continue
 
             final_answer = response.content or ""
             self.log.final_answer(final_answer)
             return final_answer
-
-        raise MaxIterationsExceeded(
-            f"Agent '{self.name}' exceeded {self.max_iterations} iterations"
-        )
 
     async def _execute_tool_calls(self, tool_calls: list[Any]) -> list[Message]:
         results: list[Message] = []

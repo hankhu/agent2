@@ -448,6 +448,26 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 - **Fork 语义区分**：UserMessage 上 Fork 截取该消息之前的历史创建新 session；AssistantMessage 上 Fork 截取到该回复（含）的历史创建新 session。
 - **选中态样式**：选中消息高亮背景 + `border-left: double` 双线指示条；`.message-actions` 按钮栏默认 `display: none`，选中或 `focus-within` 时 `display: block`。
 
+### 6.16 /retry 重试、平滑贴底滚动、代码块/长文折叠与多轮继续 (`screens/chat.py` / `widgets/message_list.py` / `app.py`)
+
+- **`/retry` 与消息级重试**：
+  - `UserMessage` / `AssistantMessage` 增加 `🔄 Retry` 操作按钮，触发 `RetryRequested` 事件。
+  - 在 `UserMessage` 上重试：回退到该消息之前（`rewind_to(idx, inclusive=False)`），重新向 agent 发送该提问。
+  - 在 `AssistantMessage` 上重试：向前查找对应的前序用户提问（`Role.USER`），回退到该提问之前并重新生成。
+  - `/retry` 指令：快速对最后一轮对话执行相同回退与重新执行。
+- **平滑贴底滚动 (Sticky Scroll)**：
+  - `MessageList` 继承自 `ScrollableContainer`，初始化调用 `self.anchor(True)`。
+  - 当 `not self._anchor_released or self.is_vertical_scroll_end` 时，收到新消息平滑滚至最底端。
+  - 用户向上翻看历史时，保持当前阅读视窗；用户滚回底部或提交新输入时，自动重置贴底锚点。
+- **代码块与大段文字折叠**：
+  - `AssistantMessage` 通过正则 `_split_markdown_segments` 分解段落：超过 4 行的代码块折叠为 `📦 Code (lang, N lines)`；超过 8 行或 400 字符的大段文本折叠为 `📄 Text (N lines) — 摘要…`。短小段落直接呈为 `Markdown`。
+  - `ConfirmCard` 中 `file_write` 生成的 Diff 预览超过 6 行时包装为 `Collapsible` 折叠展示。
+  - `Ctrl+O` 快捷键扩展为一键批量切换消息列表内所有折叠块（工具结果、代码、文字）。
+- **最大轮数限制继续执行**：
+  - `TUIReActAgent._run_loop` 循环中每当 `iteration % self.max_iterations == 0` 时，向 `approval_callback` 派发 `tool_name="max_iterations"` 审批；
+  - `ConfirmCard` 识别该工具名并呈现：`⚠ 最大轮数限制：已执行 X 轮对话，是否允许继续执行？`，支持 `[y] 继续`、`[n] 停止`、`[a] 始终允许`。
+  - 同意后追加轮数无缝继续；拒绝后抛出 `MaxIterationsExceeded` 结束并生成总结；已结束的任务可通过 `▶ Continue` 按钮或 `/continue` 指令继续唤醒。
+
 ---
 
 ## 7. 异步设计

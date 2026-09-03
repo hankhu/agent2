@@ -8,7 +8,7 @@ from pathlib import Path
 
 from textual import events
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Static
+from textual.widgets import Button, Collapsible, Static
 
 from agent2.app.tui.widgets.diff_view import DiffView
 
@@ -29,6 +29,18 @@ class ConfirmCard(Vertical):
         self._decision: str | None = None
 
     def compose(self):  # type: ignore[override]
+        if self._tool_name == "max_iterations":
+            rounds = self._arguments.get("rounds", "")
+            yield Static(
+                f"[bold yellow]⚠ 最大轮数限制：[/bold yellow]"
+                f"已执行 [bold cyan]{rounds}[/bold cyan] 轮对话，是否允许继续执行？"
+            )
+            with Horizontal(id="confirm-buttons"):
+                yield Button("[green][y] 继续 (Continue)[/green]", id="approve")
+                yield Button("[red][n] 停止 (Stop)[/red]", id="reject")
+                yield Button("[yellow][a] 始终允许 (Always)[/yellow]", id="always")
+            return
+
         args_display = " ".join(
             f"[dim]{k}=[/dim][cyan]{_truncate(repr(v), 120)}[/cyan]"
             for k, v in self._arguments.items()
@@ -44,10 +56,19 @@ class ConfirmCard(Vertical):
                 f"[bold cyan]{self._tool_name}[/bold cyan]"
             )
 
-        # Show inline diff for file_write
+        # Show inline diff for file_write (folded if >= 6 lines)
         diff = self._compute_diff()
         if diff:
-            yield DiffView(diff, filename=str(self._arguments.get("path", "")))
+            diff_lines = diff.splitlines()
+            if len(diff_lines) >= 6:
+                yield Collapsible(
+                    DiffView(diff, filename=str(self._arguments.get("path", ""))),
+                    title=f"📝 Diff: {self._arguments.get('path', '')} ({len(diff_lines)} lines)",
+                    collapsed=True,
+                    classes="diff-collapse",
+                )
+            else:
+                yield DiffView(diff, filename=str(self._arguments.get("path", "")))
 
         with Horizontal(id="confirm-buttons"):
             yield Button("[green][y] Approve[/green]", id="approve")
@@ -120,6 +141,10 @@ class ConfirmCard(Vertical):
             "always": "[bold yellow]✓ Always Allowed[/bold yellow]",
             "reject": "[bold red]✗ Rejected[/bold red]",
         }
+        if self._tool_name == "max_iterations":
+            badge_map["approve"] = "[bold green]✓ 允许继续[/bold green]"
+            badge_map["always"] = "[bold yellow]✓ 始终允许继续[/bold yellow]"
+            badge_map["reject"] = "[bold red]✗ 停止执行[/bold red]"
         status_text = badge_map.get(decision, f"[dim]{decision}[/dim]")
         self.mount(Static(status_text, id="confirm-status"))
 

@@ -154,6 +154,44 @@ ToolCard .tool-result CollapsibleTitle {
     margin: 0;
 }
 
+/* ── Content & Diff Folding ─────────────────────────────────── */
+
+.content-collapse {
+    margin: 1 0 0 0;
+    padding: 0 1;
+    background: $panel 20%;
+    border-left: solid $accent 50%;
+    height: auto;
+}
+
+.content-collapse > Contents {
+    height: auto;
+    padding: 0;
+}
+
+.content-collapse CollapsibleTitle {
+    padding: 0;
+    margin: 0;
+}
+
+.diff-collapse {
+    margin: 1 0 0 0;
+    padding: 0 1;
+    background: $panel 20%;
+    border-left: solid $warning 50%;
+    height: auto;
+}
+
+.diff-collapse > Contents {
+    height: auto;
+    padding: 0;
+}
+
+.diff-collapse CollapsibleTitle {
+    padding: 0;
+    margin: 0;
+}
+
 /* ── Diff View ──────────────────────────────────────────────── */
 
 DiffView {

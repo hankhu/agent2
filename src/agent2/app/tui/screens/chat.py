@@ -29,8 +29,10 @@ from agent2.app.tui.planner import (
 from agent2.app.tui.widgets.input_area import ChatInput
 from agent2.app.tui.widgets.message_list import (
     AssistantMessage,
+    ContinueRequested,
     ForkRequested,
     MessageList,
+    RetryRequested,
     RewindRequested,
     UserMessage,
 )
@@ -49,6 +51,8 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/model", "Switch LLM model"),
     ("/models", "Alias for /model"),
     ("/clear", "Clear display"),
+    ("/retry", "Retry last user query / regenerate response"),
+    ("/continue", "Continue execution if paused or reached max iterations"),
     ("/rewind", "Rewind to previous conversation round"),
     ("/fork", "Fork current session and continue (/fork [title])"),
     ("/new", "Start new session"),
@@ -489,6 +493,7 @@ class ChatScreen(Screen):
                 event.content, is_error=event.is_error,
             )
             self._current_tool_card = None
+            self.query_one("#messages", MessageList)._maybe_scroll_to_bottom()
         self.query_one(StatusBar).status_text = "Processing…"
 
     def on_status_text(self, event: StatusText) -> None:
@@ -555,6 +560,51 @@ class ChatScreen(Screen):
         elif cmd == "/clear":
             messages.clear_messages()
             messages.add_system_message("🧹 Display cleared.")
+
+        elif cmd == "/retry":
+            if self.query_one(StatusBar).busy:
+                messages.add_system_message("⚠️ Agent 正在执行中，请先等待或按 Ctrl+C 中断。")
+                return
+
+            user_indices = [
+                i for i, m in enumerate(app.agent._messages)
+                if m.role == Role.USER
+            ]
+            if not user_indices:
+                messages.add_system_message("⚠️ 当前会话没有可重试的对话轮次。")
+                return
+
+            last_user_idx = user_indices[-1]
+            last_user_msg = app.agent._messages[last_user_idx]
+            last_user_text = last_user_msg.content or ""
+
+            app.agent.rewind_to(last_user_idx, inclusive=False)
+            messages.clear_messages()
+            self._rebuild_messages()
+            self._save_session()
+            self._sync_status_bar()
+
+            messages.add_user_message(last_user_text, message_index=len(app.agent._messages))
+            messages.add_system_message("🔄 正在重新生成回复...")
+            app.session_manager.log_event(
+                app.session_id, "RETRY", f"Retrying user message at index {last_user_idx}"
+            )
+            self._run_agent(last_user_text)
+
+        elif cmd in ("/continue", "/c"):
+            if self.query_one(StatusBar).busy:
+                messages.add_system_message("⚠️ Agent 正在执行中，请先等待或按 Ctrl+C 中断。")
+                return
+
+            if not self._session_has_input():
+                messages.add_system_message("⚠️ 当前会话还没有任务，无法继续。")
+                return
+
+            continue_prompt = arg or "请继续完成上述任务。"
+            messages.add_user_message(continue_prompt, message_index=len(app.agent._messages))
+            messages.add_system_message("▶ 继续执行任务...")
+            app.session_manager.log_event(app.session_id, "CONTINUE", continue_prompt)
+            self._run_agent(continue_prompt)
 
         elif cmd == "/rewind":
             if self.query_one(StatusBar).busy:
@@ -679,6 +729,8 @@ class ChatScreen(Screen):
                 "\n[bold cyan]Commands[/bold cyan]\n"
                 "  /model [name]   Switch model\n"
                 "  /clear          Clear display\n"
+                "  /retry          Retry last query / regenerate response\n"
+                "  /continue       Continue execution if paused or reached max iterations\n"
                 "  /rewind         Rewind to previous round\n"
                 "  /fork [title]   Fork current session and continue\n"
                 "  /new            New session\n"
@@ -779,10 +831,10 @@ class ChatScreen(Screen):
                 return
 
     def action_toggle_tool_results(self) -> None:
-        """Ctrl+O: toggle expand/collapse state on all tool result panels."""
+        """Ctrl+O: toggle expand/collapse state on all tool results & folded content."""
         from textual.widgets import Collapsible
 
-        results = list(self.query(Collapsible).filter(".tool-result"))
+        results = list(self.query_one("#messages", MessageList).query(Collapsible))
         if not results:
             return
         any_collapsed = any(r.collapsed for r in results)
@@ -800,7 +852,7 @@ class ChatScreen(Screen):
             )
         self.app.exit()
 
-    # ── Point Rewind & Fork event handlers ──────────────────────
+    # ── Point Rewind & Fork & Retry event handlers ───────────────
 
     def on_rewind_requested(self, event: RewindRequested) -> None:
         if self.query_one(StatusBar).busy:
@@ -809,6 +861,28 @@ class ChatScreen(Screen):
             )
             return
         self._handle_point_rewind(event.message_widget, event.message_index)
+
+    def on_retry_requested(self, event: RetryRequested) -> None:
+        if self.query_one(StatusBar).busy:
+            self.query_one("#messages", MessageList).add_system_message(
+                "⚠️ Agent 正在执行中，请先等待或按 Ctrl+C 中断。"
+            )
+            return
+        self._handle_point_retry(event.message_widget, event.message_index)
+
+    def on_continue_requested(self, event: ContinueRequested) -> None:
+        if self.query_one(StatusBar).busy:
+            self.query_one("#messages", MessageList).add_system_message(
+                "⚠️ Agent 正在执行中，请先等待或按 Ctrl+C 中断。"
+            )
+            return
+        app: Agent2App = self.app  # type: ignore[assignment]
+        messages = self.query_one("#messages", MessageList)
+        continue_prompt = "请继续完成上述任务。"
+        messages.add_user_message(continue_prompt, message_index=len(app.agent._messages))
+        messages.add_system_message("▶ 继续执行任务...")
+        app.session_manager.log_event(app.session_id, "CONTINUE", continue_prompt)
+        self._run_agent(continue_prompt)
 
     def on_fork_requested(self, event: ForkRequested) -> None:
         if self.query_one(StatusBar).busy:
@@ -924,6 +998,53 @@ class ChatScreen(Screen):
             app.session_manager.log_event(
                 new_id, "FORK", f"Forked from session at assistant message index {idx}"
             )
+
+    def _handle_point_retry(self, widget: Any, message_index: int | None) -> None:
+        app: Agent2App = self.app  # type: ignore[assignment]
+        idx = self._resolve_message_index(widget, message_index)
+        if idx is None:
+            return
+
+        messages = self.query_one("#messages", MessageList)
+
+        if isinstance(widget, UserMessage):
+            prompt = widget._text
+            app.agent.rewind_to(idx, inclusive=False)
+            messages.clear_messages()
+            self._rebuild_messages()
+            self._save_session()
+            self._sync_status_bar()
+
+            messages.add_user_message(prompt, message_index=len(app.agent._messages))
+            messages.add_system_message("🔄 正在重新生成回复...")
+            app.session_manager.log_event(
+                app.session_id, "RETRY", f"Retrying user message at index {idx}"
+            )
+            self._run_agent(prompt)
+
+        elif isinstance(widget, AssistantMessage):
+            user_idx = None
+            for i in range(idx - 1, -1, -1):
+                if app.agent._messages[i].role == Role.USER:
+                    user_idx = i
+                    break
+            if user_idx is None:
+                messages.add_system_message("⚠️ 无法找到该回复对应的用户提问。")
+                return
+
+            user_prompt = app.agent._messages[user_idx].content or ""
+            app.agent.rewind_to(user_idx, inclusive=False)
+            messages.clear_messages()
+            self._rebuild_messages()
+            self._save_session()
+            self._sync_status_bar()
+
+            messages.add_user_message(user_prompt, message_index=len(app.agent._messages))
+            messages.add_system_message("🔄 正在重新生成回复...")
+            app.session_manager.log_event(
+                app.session_id, "RETRY", f"Retrying from user message at index {user_idx}"
+            )
+            self._run_agent(user_prompt)
 
 
     # ── Helpers ─────────────────────────────────────────────────

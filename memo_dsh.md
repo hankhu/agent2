@@ -168,3 +168,32 @@
   - `src/agent2/app/tui/styles.py`
   - `src/agent2/app/tui/widgets/message_list.py`
   - `tests/test_rewind_fork.py`
+
+## 12. /retry 指令与按钮、平滑贴底滚动、代码/大段文字折叠与最大轮数继续 (v0.1.3.10)
+
+- **支持 `/retry` 指令与重试按钮**：
+  - `SLASH_COMMANDS` 注册 `/retry`；支持直接输入 `/retry` 重发最后一轮用户消息并重新生成助手回答。
+  - `UserMessage` 与 `AssistantMessage` 的操作按钮栏增加 `🔄 Retry` 按钮。
+  - 触发 `RetryRequested` 事件，支持精准从指定用户提问或指定助手回复对应的提问开始重试并自动重新执行。
+
+- **平滑贴底自动滚动 (Sticky Scroll)**：
+  - `MessageList` 挂载时启用 `anchor(True)`。
+  - 用户未主动向上滚动或滚动条已在最底时，收到新消息（User、Assistant、System、Thinking、ToolCard、ConfirmCard 及工具执行完毕）均自动平滑滚动至最底。
+  - 用户向上翻看历史时，不强制劫持视窗；当用户滚动回底部后，自动恢复随新消息下滚。
+  - 用户主动提交消息时自动贴底并重置贴底锚点。
+
+- **代码块与大段文字折叠 (Collapsible Folding)**：
+  - `AssistantMessage` 自动解析 Markdown 段落：
+    - 代码块（` ``` ` 超过 4 行）自动折叠为 `📦 Code (lang, N lines)` 面板，默认折叠。
+    - 大段文字段落（超过 8 行或 400 字符）自动折叠为 `📄 Text (N lines) — 摘要…`，默认折叠。
+    - 短小段落直接呈现为 Markdown，保持紧凑整洁。
+  - `ConfirmCard` 中 `file_write` 生成的 Diff 预览超过 6 行时自动折叠为 `📝 Diff (N lines)`。
+  - 快捷键 `Ctrl+O` 支持一键展开/折叠消息流中所有折叠块（工具结果、代码块、文字段落）。
+
+- **多轮消息达到最大轮数时允许继续**：
+  - `TUIReActAgent._run_loop` 在达到 `max_iterations` 限制且未完成时，通过 HITL 弹窗向用户请求审批（`tool_name="max_iterations"`），选项：`[y] 继续 (Continue) / [n] 停止 (Stop) / [a] 始终允许 (Always)`。
+  - 用户同意后追加轮数无缝继续执行。
+  - 支持 `/continue` 指令手动继续；助手消息遇到达到上限提示时自动展示 `▶ Continue` 按钮，一键继续执行。
+
+- **测试覆盖**（`tests/test_retry_scroll_limit.py`）：
+  - 9 个完整单元与集成测试全部通过，覆盖指令、按钮事件、滚动逻辑、折叠逻辑与轮数限制继续执行。
