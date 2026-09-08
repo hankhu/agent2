@@ -6,15 +6,68 @@ Screen {
     color: $text;
 }
 
-/* ── Status Bar ─────────────────────────────────────────────── */
+/* ── Top Navigation Bar ─────────────────────────────────────── */
 
-StatusBar {
+TopTabBar {
     height: 1;
-    background: $panel;
+    width: 100%;
+    layout: horizontal;
+    background: $surface;
+    padding: 0 1;
+    margin: 0;
+    border: none;
+}
+
+.top-tab {
+    height: 1;
+    width: auto;
+    min-width: 9;
+    padding: 0 1;
+    margin: 0 1 0 0;
+    color: $text-muted;
+    background: transparent;
+    text-align: center;
+}
+
+.top-tab:hover {
+    color: $text;
+    background: $panel 40%;
+}
+
+.top-tab.active {
+    background: $primary;
+    color: #ffffff;
+    text-style: bold;
+}
+
+/* ── Welcome Banner ─────────────────────────────────────────── */
+
+WelcomeBanner {
+    height: auto;
+    padding: 1 1 0 1;
+    margin: 0;
+    background: transparent;
+}
+
+/* ── Context Bar (Above Chat Input) ─────────────────────────── */
+
+ContextBar {
+    height: 1;
+    background: transparent;
     color: $text-muted;
     padding: 0 1;
     margin: 0;
-    content-align-horizontal: left;
+    border: none;
+}
+
+/* ── Status Bar / Footer (Bottom Row) ────────────────────────── */
+
+StatusBar {
+    height: 1;
+    background: $surface;
+    color: $text-muted;
+    padding: 0 1;
+    margin: 0;
     border: none;
 }
 

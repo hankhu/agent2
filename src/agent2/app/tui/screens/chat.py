@@ -26,6 +26,8 @@ from agent2.app.tui.planner import (
     synthesize_plan_results,
     topological_sort_tasks,
 )
+from agent2.app.tui.screens.help import HelpScreen
+from agent2.app.tui.screens.session_select import SessionSelectScreen
 from agent2.app.tui.widgets.input_area import ChatInput
 from agent2.app.tui.widgets.message_list import (
     AssistantMessage,
@@ -36,7 +38,9 @@ from agent2.app.tui.widgets.message_list import (
     RewindRequested,
     UserMessage,
 )
-from agent2.app.tui.widgets.status_bar import StatusBar
+from agent2.app.tui.widgets.nav_bar import TopTabBar
+from agent2.app.tui.widgets.status_bar import ContextBar, StatusBar
+from agent2.app.tui.widgets.welcome_banner import WelcomeBanner
 
 if TYPE_CHECKING:
     from agent2.app.tui.app import Agent2App
@@ -106,23 +110,24 @@ class StatusText(Message):
 
 
 class ChatScreen(Screen):
-    """Primary screen: status bar + message list + input area."""
+    """Primary screen: top nav bar + message list + input area + context & status bars."""
 
     BINDINGS = [
         Binding("ctrl+c", "interrupt", "Interrupt", priority=True),
         Binding("ctrl+o", "toggle_tool_results", "Toggle Results", priority=True),
         Binding("ctrl+d", "quit_app", "Quit", priority=True),
         Binding("escape", "cancel_selection", "Cancel Selection", priority=False),
+        Binding("f1", "tab_current", "Current Tab", show=False),
+        Binding("f2", "tab_sessions", "Sessions Tab", show=False),
+        Binding("f3", "tab_help", "Help Tab", show=False),
     ]
 
     def compose(self):  # type: ignore[override]
+        yield TopTabBar(id="top-nav")
         yield MessageList(id="messages")
         with Vertical(id="input-area"):
+            yield ContextBar(id="context-bar")
             yield OptionList(id="completion-list")
-            yield Static(
-                "Enter ↵ send  │  Shift+Enter ↵ newline  │  Ctrl+O results  │  Ctrl+D quit",
-                id="input-hint",
-            )
             yield ChatInput(id="chat-input")
         yield StatusBar()
 
@@ -139,6 +144,8 @@ class ChatScreen(Screen):
         # If starting or resuming a session with history, render messages
         if self._session_has_input():
             self._rebuild_messages()
+        else:
+            self.query_one("#messages", MessageList).mount(WelcomeBanner(id="welcome-banner"))
 
         # Auto-send initial message if provided via -i
         if app.initial_message:
@@ -146,6 +153,96 @@ class ChatScreen(Screen):
             app.initial_message = None  # consume
             self.query_one("#messages", MessageList).add_user_message(msg)
             self._run_agent(msg)
+
+    # ── Tab Navigation ──────────────────────────────────────────
+
+    def on_chat_input_cycle_tab_requested(self, event: ChatInput.CycleTabRequested) -> None:
+        self.query_one(TopTabBar).cycle_tab()
+
+    def on_top_tab_bar_tab_selected(self, event: TopTabBar.TabSelected) -> None:
+        tab_id = event.tab_id
+        if tab_id == "current":
+            self.query_one(TopTabBar).active_tab = "current"
+            self.query_one("#chat-input", ChatInput).focus()
+        elif tab_id == "sessions":
+            self._open_sessions_dialog()
+        elif tab_id == "help":
+            self._open_help_dialog()
+
+    def action_tab_current(self) -> None:
+        self.query_one(TopTabBar).active_tab = "current"
+        self.query_one("#chat-input", ChatInput).focus()
+
+    def action_tab_sessions(self) -> None:
+        self.query_one(TopTabBar).active_tab = "sessions"
+        self._open_sessions_dialog()
+
+    def action_tab_help(self) -> None:
+        self.query_one(TopTabBar).active_tab = "help"
+        self._open_help_dialog()
+
+    def _open_help_dialog(self) -> None:
+        def on_dismiss(_: Any) -> None:
+            self.query_one(TopTabBar).active_tab = "current"
+            self.query_one("#chat-input", ChatInput).focus()
+
+        self.app.push_screen(HelpScreen(), callback=on_dismiss)
+
+    def _open_sessions_dialog(self) -> None:
+        app: Agent2App = self.app  # type: ignore[assignment]
+        messages = self.query_one("#messages", MessageList)
+        try:
+            sessions = app.session_manager.list_sessions()
+        except Exception as exc:
+            messages.add_system_message(f"❌ Failed to list sessions: {exc}")
+            self.query_one(TopTabBar).active_tab = "current"
+            self.query_one("#chat-input", ChatInput).focus()
+            return
+
+        if not sessions:
+            messages.add_system_message("No saved sessions.")
+            self.query_one(TopTabBar).active_tab = "current"
+            self.query_one("#chat-input", ChatInput).focus()
+            return
+
+        def on_session(session_id: str | None) -> None:
+            self.query_one(TopTabBar).active_tab = "current"
+            self.query_one("#chat-input", ChatInput).focus()
+            if not session_id:
+                return
+            app.load_session(session_id)
+            messages.clear_messages()
+            self._rebuild_messages()
+            self._reset_usage()
+            self.query_one(StatusBar).reset_timer()
+            try:
+                self.query_one(ContextBar).reset_timer()
+            except Exception:
+                pass
+            self._sync_status_bar()
+            messages.add_system_message(
+                f"🔄 Session {session_id[:8]} restored."
+            )
+
+        self.app.push_screen(
+            SessionSelectScreen(sessions, session_manager=app.session_manager),
+            callback=on_session,
+        )
+
+    def _set_busy(self, busy: bool, text: str = "") -> None:
+        """Update busy state and status text on both StatusBar and ContextBar."""
+        try:
+            status = self.query_one(StatusBar)
+            status.busy = busy
+            status.status_text = text if busy else ""
+        except Exception:
+            pass
+        try:
+            ctx = self.query_one(ContextBar)
+            ctx.busy = busy
+            ctx.status_text = text if busy else ""
+        except Exception:
+            pass
 
     def _switch_mode(self, new_mode: str) -> None:
         app: Agent2App = self.app  # type: ignore[assignment]
@@ -168,10 +265,19 @@ class ChatScreen(Screen):
         return user_msg
 
     async def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
-        text = event.text
+        text = event.text.strip()
         self._hide_completion()
         messages = self.query_one("#messages", MessageList)
         messages.deselect_all()
+
+        # Shortcuts corresponding to bottom bar hints
+        if text in ("?", "？", "help"):
+            self._open_help_dialog()
+            return
+
+        if text == "+":
+            self._open_sessions_dialog()
+            return
 
         if text.startswith("/"):
             await self._handle_command(text)
@@ -303,8 +409,7 @@ class ChatScreen(Screen):
 
         # Show "Processing…" in the status bar right away, until the
         # response returns (or the request fails / is interrupted).
-        status.busy = True
-        status.status_text = "Processing…"
+        self._set_busy(True, "Processing…")
 
         try:
             # Expand #file / #dir context inside the worker so slow disk
@@ -323,8 +428,7 @@ class ChatScreen(Screen):
         finally:
             agent.log = original_log
             if generation == self._run_generation:
-                status.busy = False
-                status.status_text = ""
+                self._set_busy(False)
 
         # Auto-save (skipped when the conversation has no input at all)
         self._save_session()
@@ -340,8 +444,7 @@ class ChatScreen(Screen):
 
         self._run_generation += 1
         generation = self._run_generation
-        status.busy = True
-        status.status_text = "Analyzing intent & planning…"
+        self._set_busy(True, "Analyzing intent & planning…")
 
         try:
             processed = await asyncio.to_thread(_process_context, user_text)
@@ -368,8 +471,7 @@ class ChatScreen(Screen):
             app.session_manager.log_event(app.session_id, "ERROR", str(exc))
         finally:
             if generation == self._run_generation:
-                status.busy = False
-                status.status_text = ""
+                self._set_busy(False)
 
         self._save_session()
 
@@ -388,7 +490,7 @@ class ChatScreen(Screen):
 
         self._run_generation += 1
         generation = self._run_generation
-        status.busy = True
+        self._set_busy(True, "Starting plan execution…")
 
         ordered_tasks = topological_sort_tasks(plan.tasks)
         task_results: dict[str, str] = {}
@@ -397,7 +499,7 @@ class ChatScreen(Screen):
         try:
             total = len(ordered_tasks)
             for idx, task in enumerate(ordered_tasks, 1):
-                status.status_text = f"Subtask [{idx}/{total}] (#{task.id})…"
+                self._set_busy(True, f"Subtask [{idx}/{total}] (#{task.id})…")
                 messages.add_system_message(
                     f"▶ 正在执行子任务 [{idx}/{total}] (ID: {task.id}): {task.description}"
                 )
@@ -445,7 +547,7 @@ class ChatScreen(Screen):
                 )
 
             # Synthesize final answer from all subtask results
-            status.status_text = "Synthesizing final answer…"
+            self._set_busy(True, "Synthesizing final answer…")
             final_answer = await synthesize_plan_results(
                 app.agent.llm,
                 goal=original_goal,
@@ -465,8 +567,7 @@ class ChatScreen(Screen):
             app.session_manager.log_event(app.session_id, "ERROR", str(exc))
         finally:
             if generation == self._run_generation:
-                status.busy = False
-                status.status_text = ""
+                self._set_busy(False)
 
         self._save_session()
 
@@ -508,10 +609,10 @@ class ChatScreen(Screen):
             )
             self._current_tool_card = None
             self.query_one("#messages", MessageList)._maybe_scroll_to_bottom()
-        self.query_one(StatusBar).status_text = "Processing…"
+        self._set_busy(True, "Processing…")
 
     def on_status_text(self, event: StatusText) -> None:
-        self.query_one(StatusBar).status_text = event.text
+        self._set_busy(True, event.text)
 
     # ── Slash commands ──────────────────────────────────────────
 
@@ -573,6 +674,7 @@ class ChatScreen(Screen):
 
         elif cmd == "/clear":
             messages.clear_messages()
+            messages.mount(WelcomeBanner(id="welcome-banner"))
             messages.add_system_message("🧹 Display cleared.")
 
         elif cmd == "/retry":
@@ -799,29 +901,7 @@ class ChatScreen(Screen):
                 messages.add_system_message(f"Session matching '{arg}' not found.")
             return
 
-        if not sessions:
-            messages.add_system_message("No saved sessions.")
-            return
-
-        from agent2.app.tui.screens.session_select import SessionSelectScreen
-
-        def on_session(session_id: str | None) -> None:
-            if not session_id:
-                return
-            app.load_session(session_id)
-            messages.clear_messages()
-            self._rebuild_messages()
-            self._reset_usage()
-            self.query_one(StatusBar).reset_timer()
-            self._sync_status_bar()
-            messages.add_system_message(
-                f"🔄 Session {session_id[:8]} restored."
-            )
-
-        self.app.push_screen(
-            SessionSelectScreen(sessions, session_manager=app.session_manager),
-            callback=on_session,
-        )
+        self._open_sessions_dialog()
 
 
     def _rebuild_messages(self) -> None:
@@ -847,7 +927,9 @@ class ChatScreen(Screen):
         for w in self.app.workers:
             if w.group == "agent" and w.is_running:
                 w.cancel()
+                self._set_busy(False)
                 return
+        self._set_busy(False)
 
     def action_toggle_tool_results(self) -> None:
         """Ctrl+O: toggle expand/collapse state on all tool results & folded content."""
@@ -1103,27 +1185,61 @@ class ChatScreen(Screen):
         status.input_tokens = 0
         status.output_tokens = 0
         status.context_tokens = 0
+        try:
+            ctx = self.query_one(ContextBar)
+            ctx.input_tokens = 0
+            ctx.output_tokens = 0
+            ctx.context_tokens = 0
+        except Exception:
+            pass
 
     def _sync_status_bar(self) -> None:
-        """Push model name, token usage, and mode from the app/agent to the bar."""
+        """Push model name, token usage, and mode from the app/agent to the status & context bars."""
+        from agent2.app.chat import resolve_provider_or_host
+
         app: Agent2App = self.app  # type: ignore[assignment]
         status = self.query_one(StatusBar)
+        try:
+            context_bar = self.query_one(ContextBar)
+        except Exception:
+            context_bar = None
         llm = app.agent.llm
 
-        status.mode = getattr(app, "mode", "agent").upper()
-        status.model_name = llm.model
-        status.context_window = getattr(llm, "context_window", 0) or 0
+        provider_val = getattr(llm, "provider", None)
+        base_url_val = getattr(llm, "base_url", None) or getattr(llm, "_base_url", None)
+        provider_disp = resolve_provider_or_host(provider_val, base_url_val)
 
+        mode_str = getattr(app, "mode", "agent").upper()
+        status.mode = mode_str
+        status.model_name = llm.model
+        status.provider = provider_disp
+        ctx_win = getattr(llm, "context_window", 0) or 0
+        status.context_window = ctx_win
+
+        in_tok = 0
+        out_tok = 0
         total = getattr(llm, "total_usage", None)
         if total is not None:
-            status.input_tokens = total.prompt_tokens
-            status.output_tokens = total.completion_tokens
+            in_tok = total.prompt_tokens
+            out_tok = total.completion_tokens
+            status.input_tokens = in_tok
+            status.output_tokens = out_tok
 
-        # Current context size = prompt tokens of the most recent request
-        # (the prompt of the last call contains the whole conversation).
+        ctx_tok = 0
         last = getattr(llm, "last_usage", None)
         if last is not None and last.prompt_tokens:
-            status.context_tokens = last.prompt_tokens
+            ctx_tok = last.prompt_tokens
+            status.context_tokens = ctx_tok
+
+        if context_bar is not None:
+            context_bar.model_name = llm.model
+            context_bar.provider = provider_disp
+            context_bar.context_window = ctx_win
+            context_bar.input_tokens = in_tok
+            context_bar.output_tokens = out_tok
+            context_bar.context_tokens = ctx_tok
+            context_bar.busy = status.busy
+            context_bar.status_text = status.status_text
 
 
 # ── Context injection ───────────────────────────────────────────

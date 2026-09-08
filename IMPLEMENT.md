@@ -482,6 +482,21 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 - **用户消息即时挂载渲染**：
   - `ChatScreen._mount_and_render_user_message` 在发送网络请求前立即完成用户消息的 DOM 挂载和贴底刷新，杜绝网络通信阶段的视窗迟滞。
 
+### 6.18 Copilot CLI 风格极简 TUI、顶栏导航与提供商/Host 智能解析 (`nav_bar.py` / `model_select.py` / `session_select.py` / `status_bar.py` / `chat.py`)
+
+- **TopTabBar 标签导航与键盘流**：
+  - `TopTabBar` 封装 `Current`、`Sessions`、`Help` 标签，通过 `layout: horizontal` 配合 `width: auto` 消除弹性挤压。
+  - `ChatInput` 监听按键：在输入框无文本时按 `Tab` 触发 `CycleTabRequested` 自动轮转标签；`F1`/`F2`/`F3` 或鼠标点击支持快速直达。
+- **全屏模态选择器与 Rich 方括号转义**：
+  - `ModelSelectScreen` 与 `SessionSelectScreen` 统一使用全屏无边框深色背景（`#0d1117`），选条高亮采用饱和蓝（`#1f6feb`）。
+  - 模型与会话均支持即打即搜实时过滤，并在列表渲染中对 Rich Markup 的方括号进行转义（`\\[provider]`），杜绝因 Rich 样式标签误匹配导致提供商名称丢失的问题。
+- **智能识别模型提供商与 Host 降级** (`agent2/app/chat.py`)：
+  - 实现 `extract_host(url)` 提取带端口的 authority（如 `localhost:11434`、`api.deepseek.com`）。
+  - 实现 `resolve_provider_or_host(provider, base_url)`：显式 provider 优先；若为通用占位符（如 `config.models` / `default`）则嗅探 URL 是否属于知名服务商；若仍未知则安全回退到 base_url host。
+- **双状态栏协同**：
+  - `ContextBar` 与 `StatusBar` 共同维护 `provider` 响应式属性，通过 `_sync_status_bar` 统一从底层 `OpenAILLM` 读取并刷新。
+  - 封装统一的 `_set_busy` 管理机制，彻底消除发送 `?` 或 `help` 时引起的卡在 `processing...` 异常。
+
 
 ---
 

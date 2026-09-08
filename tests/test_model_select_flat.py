@@ -9,6 +9,7 @@ from textual.widgets import Select, Static
 from agent2.app.tui.app import Agent2App
 from agent2.app.tui.screens.model_select import ModelSelectScreen
 from agent2.app.tui.styles import APP_CSS
+from agent2.app.tui.widgets.nav_bar import TopTabBar
 from agent2.app.tui.widgets.status_bar import StatusBar
 
 
@@ -28,7 +29,7 @@ def test_app_css_validity() -> None:
 
 @pytest.mark.asyncio
 async def test_model_select_screen_with_dropdown(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test ModelSelectScreen using drop-down menu."""
+    """Test ModelSelectScreen navigation and selection."""
     fake_models = [
         {"name": "mimo-v2.5", "model": "mimo-v2.5", "provider": "xiaomi"},
         {"name": "gpt-4o", "model": "gpt-4o", "provider": "openai"},
@@ -58,20 +59,13 @@ async def test_model_select_screen_with_dropdown(monkeypatch: pytest.MonkeyPatch
         screen = app.screen
         assert isinstance(screen, ModelSelectScreen)
 
-        # Ensure Select widget exists
-        select_widget = screen.query_one("#model-select", Select)
-        assert select_widget is not None
-        assert select_widget.has_focus
-
-        # Expand dropdown and choose an item
-        await pilot.press("enter")
-        assert select_widget.expanded
+        # Navigate down and choose the second model
         await pilot.press("down")
         await pilot.press("enter")
         await pilot.pause()
 
         # Modal should have dismissed with selected model
-        assert result in ("mimo-v2.5", "gpt-4o")
+        assert result == "gpt-4o"
 
 
 @pytest.mark.asyncio
@@ -167,12 +161,16 @@ async def test_statusbar_positioned_at_bottom() -> None:
         sb = screen.query_one(StatusBar)
         inp = screen.query_one("#input-area")
         msgs = screen.query_one("#messages")
+        top_bar = screen.query_one(TopTabBar)
 
+        # TopTabBar must be at the very top (y=0)
+        assert top_bar.region.y == 0
+        assert top_bar.region.height == 1
         # StatusBar must be on the bottom row (y=23 on a 24-row screen)
         assert sb.region.y == 23
         assert sb.region.height == 1
-        # Messages must start from the very top (y=0)
-        assert msgs.region.y == 0
+        # Messages must start below TopTabBar (y=1)
+        assert msgs.region.y == 1
         # Input area must be immediately above StatusBar
         assert inp.region.y + inp.region.height == 23
 

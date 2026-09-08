@@ -1,9 +1,12 @@
-"""Status bar widget — model, token usage, context window, and session time."""
+"""Status bar and context bar widgets for modern TUI layout."""
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 import time
 
+from rich.table import Table
 from textual.reactive import reactive
 from textual.widgets import Static
 
@@ -29,27 +32,22 @@ def _fmt_duration(seconds: float) -> str:
     return f"{s}s"
 
 
-class StatusBar(Static):
-    """Bottom bar showing model, token usage, and processing state.
+class ContextBar(Static):
+    """Context bar situated directly above the chat input box.
 
-    Layout::
-
-        Agent2 │ Model: gpt-4o  ⠋ Processing… (3s)  ↑in 1.2k (1%) ↓out 345 (0%)
-        ctx 12.3k/128k (10%)  ⏱ 5m12s
-
-    Input/output percentages are relative to the context window. While
-    :attr:`busy` is ``True`` an animated spinner plus a status label
-    (e.g. ``Processing…``) is shown until the response returns.
+    Displays:
+      - Left: Current working directory (or active tool/spinner if busy)
+      - Right: Session token usage, context ratio, and active model
     """
 
     SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-    mode: reactive[str] = reactive("AGENT")
+    cwd: reactive[str] = reactive("")
     model_name: reactive[str] = reactive("—")
+    provider: reactive[str] = reactive("")
     busy: reactive[bool] = reactive(False)
     status_text: reactive[str] = reactive("")
 
-    # Token usage for the current conversation
     input_tokens: reactive[int] = reactive(0)
     output_tokens: reactive[int] = reactive(0)
     context_tokens: reactive[int] = reactive(0)
@@ -64,68 +62,14 @@ class StatusBar(Static):
         self._clock_timer = None
 
     def on_mount(self) -> None:
-        # Refresh once per second so the session timer stays current.
         self._clock_timer = self.set_interval(1.0, lambda: self.refresh())
-
-    # ── Rendering ───────────────────────────────────────────────
-
-    def _pct(self, n: int) -> str:
-        """Percent suffix relative to the context window, e.g. `` (12%)``."""
-        if not self.context_window:
-            return ""
-        return f" ({round(n * 100 / self.context_window)}%)"
-
-    def render(self) -> str:
-        mode_upper = self.mode.upper()
-        if mode_upper == "PLAN":
-            mode_badge = "[bold yellow]PLAN[/bold yellow]"
-        elif mode_upper == "ASK":
-            mode_badge = "[bold cyan]ASK[/bold cyan]"
-        else:
-            mode_badge = "[bold green]AGENT[/bold green]"
-
-        parts = [f"Agent2 \\[{mode_badge}] │ Model: {self.model_name}"]
-
-        if self.busy:
-            frame = self.SPINNER_FRAMES[self._frame % len(self.SPINNER_FRAMES)]
-            elapsed = ""
-            if self._busy_since is not None:
-                elapsed = f" ({time.monotonic() - self._busy_since:.0f}s)"
-            label = self.status_text or "Processing…"
-            parts.append(f"[cyan]{frame}[/cyan] {label}{elapsed}")
-
-        # Token usage: cumulative in/out (with % of the window) +
-        # current context size vs window
-        if self.input_tokens or self.output_tokens:
-            parts.append(
-                f"[green]↑{_fmt_tokens(self.input_tokens)}{self._pct(self.input_tokens)}[/green] "
-                f"[blue]↓{_fmt_tokens(self.output_tokens)}{self._pct(self.output_tokens)}[/blue]"
-            )
-        if self.context_window:
-            pct = self.context_tokens * 100 / self.context_window
-            color = (
-                "red" if pct >= 90
-                else "yellow" if pct >= 75
-                else "green"
-            )
-            parts.append(
-                f"ctx {_fmt_tokens(self.context_tokens)}/{_fmt_tokens(self.context_window)} "
-                f"[{color}]({pct:.0f}%)[/{color}]"
-            )
-
-        # Session duration
-        parts.append(f"⏱ {_fmt_duration(time.monotonic() - self._session_start)}")
-
-        return "  ".join(parts)
-
-    # ── Spinner (busy animation) ────────────────────────────────
+        if not self.cwd:
+            self.cwd = os.getcwd()
 
     def reset_timer(self) -> None:
-        """Restart the conversation-duration clock (new / resumed conversation)."""
         self._session_start = time.monotonic()
 
     def watch_busy(self, busy: bool) -> None:
-        """Start/stop the spinner animation when the busy state changes."""
         if busy:
             self._busy_since = time.monotonic()
             if self._spinner_timer is None:
@@ -140,3 +84,111 @@ class StatusBar(Static):
     def _tick_spinner(self) -> None:
         self._frame += 1
         self.refresh()
+
+    def render(self) -> Table:
+        grid = Table.grid(expand=True)
+        grid.add_column(justify="left", no_wrap=True)
+        grid.add_column(justify="right", no_wrap=True)
+
+        # Left side: Path or spinner
+        if self.busy:
+            frame = self.SPINNER_FRAMES[self._frame % len(self.SPINNER_FRAMES)]
+            elapsed = ""
+            if self._busy_since is not None:
+                elapsed = f" ({time.monotonic() - self._busy_since:.0f}s)"
+            label = self.status_text or "Processing…"
+            left = f"[cyan]{frame}[/cyan] [bold]{label}[/bold]{elapsed}"
+        else:
+            p = self.cwd or os.getcwd()
+            left = f"[dim]{p}[/dim]"
+
+        # Right side: Session token usage and context
+        right_items = []
+        total_tokens = self.input_tokens + self.output_tokens
+        if total_tokens > 0:
+            right_items.append(f"Session: [bold]{_fmt_tokens(total_tokens)}[/bold] tokens")
+        else:
+            right_items.append("Session: 0 tokens")
+
+        if self.context_window and self.context_tokens:
+            pct = self.context_tokens * 100 / self.context_window
+            color = "red" if pct >= 90 else "yellow" if pct >= 75 else "green"
+            right_items.append(f"ctx {_fmt_tokens(self.context_tokens)}/{_fmt_tokens(self.context_window)} [{color}]({pct:.0f}%)[/{color}]")
+
+        if self.model_name and self.model_name != "—":
+            if self.provider:
+                right_items.append(f"[dim]\\[{self.provider}] {self.model_name}[/dim]")
+            else:
+                right_items.append(f"[dim]{self.model_name}[/dim]")
+
+        right = "  ".join(right_items)
+        grid.add_row(left, right)
+        return grid
+
+
+class StatusBar(Static):
+    """Bottom footer bar showing navigation hints and interaction mode."""
+
+    SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    mode: reactive[str] = reactive("AGENT")
+    model_name: reactive[str] = reactive("—")
+    provider: reactive[str] = reactive("")
+    busy: reactive[bool] = reactive(False)
+    status_text: reactive[str] = reactive("")
+
+    input_tokens: reactive[int] = reactive(0)
+    output_tokens: reactive[int] = reactive(0)
+    context_tokens: reactive[int] = reactive(0)
+    context_window: reactive[int] = reactive(0)
+
+    def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        super().__init__(*args, **kwargs)
+        self._frame = 0
+        self._busy_since: float | None = None
+        self._spinner_timer = None
+        self._session_start = time.monotonic()
+        self._clock_timer = None
+
+    def on_mount(self) -> None:
+        self._clock_timer = self.set_interval(1.0, lambda: self.refresh())
+
+    def reset_timer(self) -> None:
+        self._session_start = time.monotonic()
+
+    def watch_busy(self, busy: bool) -> None:
+        if busy:
+            self._busy_since = time.monotonic()
+            if self._spinner_timer is None:
+                self._spinner_timer = self.set_interval(0.1, self._tick_spinner)
+        else:
+            self._busy_since = None
+            if self._spinner_timer is not None:
+                self._spinner_timer.stop()
+                self._spinner_timer = None
+            self._frame = 0
+
+    def _tick_spinner(self) -> None:
+        self._frame += 1
+        self.refresh()
+
+    def render(self) -> Table:
+        grid = Table.grid(expand=True)
+        grid.add_column(justify="left", no_wrap=True)
+        grid.add_column(justify="right", no_wrap=True)
+
+        left = "[dim]+ sessions  ·  / commands  ·  ? help  ·  tab switch[/dim]"
+
+        mode_upper = self.mode.upper()
+        if mode_upper == "PLAN":
+            mode_badge = "[bold yellow]PLAN[/bold yellow]"
+        elif mode_upper == "ASK":
+            mode_badge = "[bold cyan]ASK[/bold cyan]"
+        else:
+            mode_badge = "[bold green]AGENT[/bold green]"
+
+        grid.add_row(left, mode_badge)
+        return grid
+
+
+FooterBar = StatusBar

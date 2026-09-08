@@ -1,33 +1,168 @@
-"""Session management modal screen — supporting list, resume, rename, and delete."""
+"""Session management screen — modern full-screen selection matching Copilot CLI aesthetic."""
 
 from __future__ import annotations
 
 import time
 from typing import Any
 
+from textual import events
 from textual.binding import Binding
 from textual.containers import Vertical
-from textual.coordinate import Coordinate
+from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Input, Static
+from textual.widgets import Input, OptionList, Static
+from textual.widgets.option_list import Option
 
+from agent2.app.tui.screens.help import HelpScreen
 from agent2.app.tui.session import SessionManager
+from agent2.app.tui.widgets.nav_bar import TopTabBar
+
+
+def _fmt_time_ago(ts: float) -> str:
+    """Format timestamp into human-readable relative time."""
+    if not ts:
+        return ""
+    diff = time.time() - ts
+    if diff < 60:
+        return "just now"
+    if diff < 3600:
+        return f"{int(diff // 60)}m ago"
+    if diff < 86400:
+        return f"{int(diff // 3600)}h ago"
+    if diff < 86400 * 7:
+        return f"{int(diff // 86400)}d ago"
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+
+
+class SessionSearchInput(Input):
+    """Search input that intercepts list navigation and action keys."""
+
+    class NavigateUp(Message):
+        pass
+
+    class NavigateDown(Message):
+        pass
+
+    class DeleteRequested(Message):
+        pass
+
+    class RenameRequested(Message):
+        pass
+
+    async def _on_key(self, event: events.Key) -> None:
+        if event.key == "up":
+            self.post_message(self.NavigateUp())
+            event.prevent_default()
+            event.stop()
+            return
+        elif event.key == "down":
+            self.post_message(self.NavigateDown())
+            event.prevent_default()
+            event.stop()
+            return
+        elif event.key == "delete" or (not self.value.strip() and event.key == "d"):
+            self.post_message(self.DeleteRequested())
+            event.prevent_default()
+            event.stop()
+            return
+        elif not self.value.strip() and event.key in ("e", "r"):
+            self.post_message(self.RenameRequested())
+            event.prevent_default()
+            event.stop()
+            return
+
+        await super()._on_key(event)
 
 
 class SessionSelectScreen(ModalScreen[str]):
-    """Modal overlay for session management (resume, rename, delete).
+    """Modern full-view session picker.
 
-    - Enter: Resume selected session
-    - e / r: Rename selected session
-    - d / delete: Delete selected session
-    - Esc: Close dialog (or cancel rename)
+    - Type to search/filter sessions in real-time
+    - Up / Down: Navigate sessions
+    - Enter: Select highlighted session to resume (or submit rename)
+    - e / r: Rename highlighted session
+    - d / delete: Delete highlighted session
+    - Esc: Cancel / back to current session
+    """
+
+    DEFAULT_CSS = """
+    SessionSelectScreen {
+        background: #0d1117;
+        color: #c9d1d9;
+        layout: vertical;
+        padding: 0;
+        margin: 0;
+    }
+
+    #session-container {
+        height: 1fr;
+        padding: 1 2 0 2;
+        margin: 0;
+    }
+
+    #session-tip {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #session-group-header {
+        height: 1;
+        margin-top: 1;
+        margin-bottom: 0;
+        color: #8b949e;
+        text-style: bold;
+    }
+
+    #session-list {
+        height: 1fr;
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin: 0;
+        scrollbar-size-vertical: 1;
+    }
+
+    #session-list > .option-list--option-highlighted {
+        background: #1f6feb;
+        color: #ffffff;
+        text-style: bold;
+    }
+
+    #session-list > .option-list--option:hover {
+        background: #161b22;
+    }
+
+    #session-search {
+        height: auto;
+        min-height: 1;
+        background: #161b22;
+        border: none;
+        padding: 0 1;
+        margin-top: 1;
+        color: #c9d1d9;
+    }
+
+    #session-search:focus {
+        background: #21262d;
+        border: none;
+    }
+
+    #session-hint {
+        height: 1;
+        margin: 0;
+        padding: 0 1;
+        color: #8b949e;
+        background: #0d1117;
+    }
     """
 
     BINDINGS = [
-        Binding("escape", "cancel_or_close", "Close"),
-        Binding("e", "edit_title", "Rename"),
-        Binding("r", "edit_title", "Rename"),
-        Binding("d", "delete_session", "Delete"),
+        Binding("escape", "cancel_or_close", "Close", priority=True),
+        Binding("up", "nav_up", "Up", show=False),
+        Binding("down", "nav_down", "Down", show=False),
+        Binding("e", "edit_title", "Rename", show=False),
+        Binding("r", "edit_title", "Rename", show=False),
+        Binding("d", "delete_session", "Delete", show=False),
     ]
 
     def __init__(
@@ -38,135 +173,162 @@ class SessionSelectScreen(ModalScreen[str]):
         super().__init__()
         self._sessions = list(sessions)
         self._session_manager = session_manager or SessionManager()
-        self._editing_session: dict[str, Any] | None = None
+        self._filtered_sessions: list[dict[str, Any]] = list(sessions)
+        self._renaming_session: dict[str, Any] | None = None
 
     def compose(self):  # type: ignore[override]
-        with Vertical(id="session-dialog"):
-            yield Static("[bold cyan]💾 Session Management[/bold cyan]", id="session-header")
-
-            table: DataTable[str] = DataTable(cursor_type="row")
-            table.add_column("#", width=4)
-            table.add_column("Title", width=48)
-            table.add_column("ID", width=12)
-            table.add_column("Saved", width=18)
-            self._populate_table(table)
-            yield table
-
-            yield Input(
-                placeholder="Enter new session title and press Enter…",
-                id="rename-input",
-            )
-
+        yield TopTabBar(id="top-nav")
+        with Vertical(id="session-container"):
             yield Static(
-                "[bold cyan]Enter[/bold cyan] Resume  │  "
-                "[bold yellow]e[/bold yellow] Rename  │  "
-                "[bold red]d[/bold red] Delete  │  "
-                "[bold dim]Esc[/bold dim] Close",
+                " [dodger_blue1]• Tip:[/dodger_blue1] [bold]/sessions[/bold]\n"
+                "   [dim]└ Manage, resume, rename, or delete conversation sessions[/dim]\n\n"
+                "[dim]Resume a saved session to restore your previous context and conversation history.\n"
+                "Use 'e' to rename, 'd' to delete, and Enter to select.[/dim]",
+                id="session-tip",
+            )
+            yield Static("Saved sessions", id="session-group-header")
+            yield OptionList(id="session-list")
+            yield SessionSearchInput(placeholder="❯ Search sessions...", id="session-search")
+            yield Static(
+                "[dim]↑/↓ to navigate  ·  enter to select  ·  e rename  ·  d delete  ·  esc to cancel[/dim]",
                 id="session-hint",
             )
 
     def on_mount(self) -> None:
-        rename_input = self.query_one("#rename-input", Input)
-        rename_input.styles.display = "none"
-        self.query_one(DataTable).focus()
+        top_bar = self.query_one(TopTabBar)
+        top_bar.active_tab = "sessions"
+        self._populate_options()
+        self.query_one("#session-search", SessionSearchInput).focus()
 
-    def _populate_table(self, table: DataTable[str] | None = None) -> None:
-        if table is None:
-            try:
-                table = self.query_one(DataTable)
-            except Exception:
-                return
-        table.clear()
-        for idx, s in enumerate(self._sessions, 1):
-            saved = (
-                time.strftime(
-                    "%Y-%m-%d %H:%M",
-                    time.localtime(float(s.get("saved_at", 0) or 0)),
-                )
-                if s.get("saved_at")
-                else ""
-            )
-            table.add_row(
-                str(idx),
-                s.get("title") or "(untitled)",
-                str(s.get("id", ""))[:12],
-                saved,
-                key=str(s.get("id", "")),
-            )
+    def _populate_options(self, query: str = "") -> None:
+        q = query.strip().lower()
+        if q:
+            self._filtered_sessions = [
+                s for s in self._sessions
+                if q in (s.get("title") or "").lower() or q in str(s.get("id", "")).lower()
+            ]
+        else:
+            self._filtered_sessions = list(self._sessions)
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        key = event.row_key
-        if key and key.value:
-            self.dismiss(str(key.value))
+        opt_list = self.query_one("#session-list", OptionList)
+        opt_list.clear_options()
 
-    def action_edit_title(self) -> None:
-        """Open inline input to rename the highlighted session."""
-        rename_input = self.query_one("#rename-input", Input)
-        if rename_input.styles.display == "block":
+        if not self._filtered_sessions:
+            opt_list.add_option(Option("[dim]No matching sessions found[/dim]", disabled=True))
             return
 
-        table = self.query_one(DataTable)
-        row = table.cursor_row
-        if 0 <= row < len(self._sessions):
-            self._editing_session = self._sessions[row]
-            rename_input.value = self._editing_session.get("title", "")
-            rename_input.styles.display = "block"
-            rename_input.focus()
+        for s in self._filtered_sessions:
+            title = s.get("title") or "(untitled)"
+            sid = str(s.get("id", ""))[:8]
+            saved_at = float(s.get("saved_at", 0) or 0)
+            time_str = _fmt_time_ago(saved_at)
+            
+            line = f"  {title:<40}  [dim]·  {sid}  ·  {time_str}[/dim]"
+            opt_list.add_option(Option(line, id=str(s.get("id", ""))))
+
+        opt_list.highlighted = 0
+
+    def on_top_tab_bar_tab_selected(self, event: TopTabBar.TabSelected) -> None:
+        if event.tab_id == "current":
+            self.dismiss("")
+        elif event.tab_id == "help":
+            self.app.push_screen(HelpScreen())
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if self._renaming_session is not None:
+            return
+        self._populate_options(event.value)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle submission of the new session title."""
-        rename_input = self.query_one("#rename-input", Input)
-        rename_input.styles.display = "none"
-
-        if self._editing_session:
+        if self._renaming_session is not None:
             new_title = event.value.strip()
             if new_title:
-                sess_id = str(self._editing_session.get("id", ""))
+                sess_id = str(self._renaming_session.get("id", ""))
                 try:
                     self._session_manager.rename(sess_id, new_title)
-                    self._editing_session["title"] = new_title
-                    # If current session is renamed, update app state
+                    self._renaming_session["title"] = new_title
                     app = self.app
                     if getattr(app, "session_id", None) == sess_id:
                         app.session_title = new_title  # type: ignore[attr-defined]
                 except Exception:
                     pass
-            self._editing_session = None
-
-        self._populate_table()
-        self.query_one(DataTable).focus()
-
-    def action_delete_session(self) -> None:
-        """Delete the highlighted session from disk and table."""
-        rename_input = self.query_one("#rename-input", Input)
-        if rename_input.styles.display == "block":
+            self._exit_rename_mode()
             return
 
-        table = self.query_one(DataTable)
-        row = table.cursor_row
-        if 0 <= row < len(self._sessions):
-            target = self._sessions.pop(row)
+        opt_list = self.query_one("#session-list", OptionList)
+        h = opt_list.highlighted
+        if h is not None and 0 <= h < len(self._filtered_sessions):
+            sess_id = str(self._filtered_sessions[h].get("id", ""))
+            self.dismiss(sess_id)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option.id:
+            self.dismiss(str(event.option.id))
+
+    def on_session_search_input_navigate_up(self, event: SessionSearchInput.NavigateUp) -> None:
+        opt_list = self.query_one("#session-list", OptionList)
+        if opt_list.highlighted is not None and opt_list.highlighted > 0:
+            opt_list.highlighted -= 1
+
+    def on_session_search_input_navigate_down(self, event: SessionSearchInput.NavigateDown) -> None:
+        opt_list = self.query_one("#session-list", OptionList)
+        if opt_list.highlighted is not None and opt_list.highlighted < opt_list.option_count - 1:
+            opt_list.highlighted += 1
+
+    def on_session_search_input_rename_requested(self, event: SessionSearchInput.RenameRequested) -> None:
+        self.action_edit_title()
+
+    def on_session_search_input_delete_requested(self, event: SessionSearchInput.DeleteRequested) -> None:
+        self.action_delete_session()
+
+    def action_nav_up(self) -> None:
+        self.on_session_search_input_navigate_up(SessionSearchInput.NavigateUp())
+
+    def action_nav_down(self) -> None:
+        self.on_session_search_input_navigate_down(SessionSearchInput.NavigateDown())
+
+    def action_edit_title(self) -> None:
+        opt_list = self.query_one("#session-list", OptionList)
+        h = opt_list.highlighted
+        if h is not None and 0 <= h < len(self._filtered_sessions):
+            self._renaming_session = self._filtered_sessions[h]
+            inp = self.query_one("#session-search", SessionSearchInput)
+            inp.placeholder = "Enter new session title and press Enter…"
+            inp.value = self._renaming_session.get("title", "")
+            inp.focus()
+
+    def _exit_rename_mode(self) -> None:
+        self._renaming_session = None
+        inp = self.query_one("#session-search", SessionSearchInput)
+        inp.placeholder = "❯ Search sessions..."
+        inp.value = ""
+        self._populate_options()
+        inp.focus()
+
+    def action_delete_session(self) -> None:
+        if self._renaming_session is not None:
+            return
+        opt_list = self.query_one("#session-list", OptionList)
+        h = opt_list.highlighted
+        if h is not None and 0 <= h < len(self._filtered_sessions):
+            target = self._filtered_sessions[h]
             sess_id = str(target.get("id", ""))
             try:
                 self._session_manager.delete(sess_id)
             except Exception:
                 pass
+            if target in self._sessions:
+                self._sessions.remove(target)
 
             if not self._sessions:
                 self.dismiss("")
                 return
 
-            self._populate_table()
-            new_row = min(row, len(self._sessions) - 1)
-            table.cursor_coordinate = Coordinate(new_row, 0)
+            inp = self.query_one("#session-search", SessionSearchInput)
+            self._populate_options(inp.value)
 
     def action_cancel_or_close(self) -> None:
-        """Esc handler: dismiss rename input if open, else close dialog."""
-        rename_input = self.query_one("#rename-input", Input)
-        if rename_input.styles.display == "block":
-            rename_input.styles.display = "none"
-            self._editing_session = None
-            self.query_one(DataTable).focus()
+        if self._renaming_session is not None:
+            self._exit_rename_mode()
         else:
             self.dismiss("")
-

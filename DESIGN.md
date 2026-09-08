@@ -272,6 +272,21 @@ synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
 - **底部状态栏与流式布局**：取消固定 dock 顶层，将状态栏调整至视窗最下方单行，位于输入区域之下，使用竖向流式布局与 `#messages` (1fr) 协同工作，彻底消除 dock 区域层叠冲突。
 - **下拉式模型选择器**：选用 Textual `Select[str]` 组件实现紧凑 drop-down menu，具备即打即搜能力并兼容自定义模型文本输入，大幅精简模态尺寸。
 
+### 4.8 极简 Copilot CLI 风格 TUI 视窗与模型/Host 智能解析
+
+- **现代极简多视窗体系**：
+  - **顶部标签栏 (`TopTabBar`)**：`Current`、`Sessions`、`Help` 紧凑水平并排排列，支持鼠标交互、快捷键（`F1`/`F2`/`F3`）以及输入框空白时按 `Tab` 循环切换。
+  - **全屏模态选择系统**：`SessionSelectScreen` 与 `ModelSelectScreen` 统一对齐 Copilot CLI 风格，具备顶栏状态联动、Tip 引导条目、全屏饱和亮蓝高光选条（`#1f6feb`）以及实时多维关键词过滤。
+- **智能提供商解析与 Host 优雅降级**：
+  - `resolve_provider_or_host(provider, base_url)` 建立自底向上的提供商识别链路：
+    1. 显式有效 `provider` 优先；
+    2. 若缺省或为通用占位符，检查 `base_url` 是否匹配已知提供商（OpenAI, DeepSeek, Anthropic, SiliconFlow, Ollama 等）；
+    3. 若无法确定，提取 `base_url` 的网络 host（包含非标准端口，如 `localhost:11434` 或内网 IP）；
+    4. 针对 Rich Markup 语法对方括号进行严格转义（`\[provider]`），防止样式标签解析吞没。
+- **输入上下文双状态栏架构**：
+  - `ContextBar`（输入框正上方）：聚合当前工作路径、请求 Spinner 耗时、Token 用量与模型提供商标注。
+  - `StatusBar`（终端底行）：轻量展示全局快捷键引导与模式徽标。
+
 
 ---
 

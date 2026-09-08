@@ -77,17 +77,46 @@ def create_llm(name_or_model: str = "openai", **kwargs: Any) -> OpenAILLM:
 
     # 2. Built-in presets
     if key in ("openai", "default"):
-        return OpenAILLM(**kwargs)
+        defaults: dict[str, Any] = {"provider": "openai"}
+        try:
+            from agent2.app.config import load_config
+
+            cfg = load_config()
+            if cfg.llm.base_url and "base_url" not in kwargs:
+                defaults["base_url"] = cfg.llm.base_url
+            if cfg.llm.provider and "provider" not in kwargs:
+                defaults["provider"] = cfg.llm.provider
+        except Exception:
+            pass
+        return OpenAILLM(**{**defaults, **kwargs})
     elif key == "ollama":
-        defaults: dict[str, Any] = {
+        defaults = {
             "model": "llama3.1",
             "base_url": "http://localhost:11434/v1",
             "api_key": "ollama",
+            "provider": "ollama",
+        }
+        return OpenAILLM(**{**defaults, **kwargs})
+    elif key == "deepseek":
+        defaults = {
+            "model": "deepseek-chat",
+            "base_url": "https://api.deepseek.com/v1",
+            "provider": "deepseek",
         }
         return OpenAILLM(**{**defaults, **kwargs})
 
     # 3. Direct model name
     if "model" not in kwargs:
         kwargs["model"] = name_or_model
+    try:
+        from agent2.app.config import load_config
+
+        cfg = load_config()
+        if cfg.llm.base_url and "base_url" not in kwargs:
+            kwargs["base_url"] = cfg.llm.base_url
+        if cfg.llm.provider and "provider" not in kwargs:
+            kwargs["provider"] = cfg.llm.provider
+    except Exception:
+        pass
     return OpenAILLM(**kwargs)
 

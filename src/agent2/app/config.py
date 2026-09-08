@@ -190,6 +190,8 @@ class AppConfig(BaseModel):
                         res["api_key"] = p.api_key
                 model_id = res.pop("model_id", None) or res.pop("model", None) or key
                 res["model"] = model_id
+                if provider_name:
+                    res["provider"] = provider_name
                 if "temperature" not in res:
                     res["temperature"] = self.temperature
                 if "max_tokens" not in res:
@@ -200,6 +202,7 @@ class AppConfig(BaseModel):
                     p = self.providers[entry]
                     return {
                         "model": key,
+                        "provider": entry,
                         "base_url": p.base_url,
                         "api_key": p.api_key,
                         "temperature": self.temperature,
@@ -211,13 +214,13 @@ class AppConfig(BaseModel):
                     "max_tokens": self.max_tokens,
                 }
 
-
         # 4. If name_or_alias matches a provider name directly
         if key_l in self.providers or key in self.providers:
             p = self.providers.get(key) or self.providers.get(key_l)
             if p:
                 return {
                     "model": key,
+                    "provider": key,
                     "base_url": p.base_url,
                     "api_key": p.api_key,
                     "temperature": self.temperature,

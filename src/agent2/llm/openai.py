@@ -35,14 +35,36 @@ class OpenAILLM(BaseLLM):
         *,
         api_key: str | None = None,
         base_url: str | None = None,
+        provider: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
         **kwargs: Any,
     ) -> None:
-        super().__init__(model, temperature=temperature, max_tokens=max_tokens, **kwargs)
+        super().__init__(
+            model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            provider=provider,
+            base_url=base_url,
+            **kwargs,
+        )
         self._api_key = api_key
         self._base_url = base_url
         self._client: Any = None  # lazy init
+
+    @property
+    def base_url(self) -> str | None:
+        if self._base_url:
+            return self._base_url
+        try:
+            from agent2.utils.config import settings as s
+            return s.base_url
+        except Exception:
+            return None
+
+    @base_url.setter
+    def base_url(self, value: str | None) -> None:
+        self._base_url = value
 
     def _get_client(self) -> Any:
         if self._client is None:

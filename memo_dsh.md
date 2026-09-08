@@ -225,3 +225,35 @@
 - **测试覆盖**（`tests/test_model_select_flat.py`, `tests/test_retry_scroll_limit.py`）：
   - 新增测试覆盖无边框 CSS 有效性、`Select` 下拉菜单展开与选取、自定义模型输入、取消操作及状态栏底部定位校验。全量 91 项测试全部通过。
 
+## 14. Copilot CLI 风格极简 TUI、顶栏导航、全屏视窗与模型提供商/Host 智能识别 (v0.1.3.12)
+
+- **Copilot CLI 风格极简现代布局**：
+  - **顶部导航栏 (`TopTabBar`)**：水平并排渲染 `Current`、`Sessions`、`Help` 紧凑标签。`Current` 采用深蓝色胶囊样式高亮；支持鼠标点击、快捷键直达（`F1`/`F2`/`F3`），以及在输入框为空时按 `Tab` 键循环切换标签。
+  - **欢迎横幅 (`WelcomeBanner`)**：空会话状态下展示居中的 ASCII Mascot 图标、版本与免责声明，以及随机轮播的 Tip 指引卡片（如 `/plan`、`/ask`、`#file` 上下文注入等），并在 `/clear` 清屏后优雅恢复。
+  - **独立帮助浮层 (`HelpScreen`)**：集中呈现 Agent/Plan/Ask 三大运行模式说明、常用按键绑定、斜杠命令清单及 `#file`/`#dir` 语法，支持 `?` 或 `/help` 快捷调出。
+
+- **全屏极简视窗交互重构**：
+  - **会话管理视窗 (`SessionSelectScreen`)**：采用全屏极简风格并保持顶栏联动；展示 `• Tip: /sessions` 引导文案；支持实时关键词过滤、全宽亮蓝高光选框（`#1f6feb`）、`↑`/`↓` 快速导航、`e` 重命名、`d` 删除会话、`Enter` 恢复会话。
+  - **模型选择视窗 (`ModelSelectScreen`)**：保留顶栏联动与 `• Tip: /model` 指引；提供模型分组与全宽亮蓝选条高光；底部搜索框边输边搜，按 `Enter` 选定或直接提交自定义模型 identifier。
+
+- **模型提供商 (Provider) 与 Host 智能识别**：
+  - 在 `src/agent2/app/chat.py` 中引入 `extract_host` 与 `resolve_provider_or_host`：
+    - 若显式配置或识别出已知提供商（如 `deepseek`、`openai`、`ollama`、`anthropic`、`siliconflow` 等），直接采用提供商名称。
+    - 若无法确定提供商（如内网私有网关或局域网 IP），自动提取并选用 `base_url` 的 host（如 `api.deepseek.com`、`localhost:11434`、`192.168.1.100:8000`）。
+    - 过滤掉 `config.models` / `config.default` / `default` 等通用占位符。
+  - 模型选择列表项清晰展示 `[provider] model_id` 或 `[host] model_id`。
+  - 转义 Rich Markup 中方括号（`\[provider]`），防止方括号文字被 Rich 误当做样式标签解析丢失。
+
+- **双层状态栏拆分与联动 (`ContextBar` + `StatusBar`)**：
+  - **`ContextBar`**（紧贴输入框上方）：左侧展示当前工作目录与执行 Spinner/耗时；右侧展示会话 Token 统计、上下文窗口占比与当前模型标签 `[provider] model_name`（或 `[host] model_name`）。
+  - **`StatusBar`**（终端底行）：左侧呈现全局导航提示，右侧呈现 `[AGENT]` / `[PLAN]` / `[ASK]` 模式徽标。
+  - `ChatScreen._sync_status_bar` 自动同步底层 LLM 的模型名称、提供商与 Token 用量至两个栏目。
+
+- **交互体验修复与增强**：
+  - 修复命令补全菜单：弹出 `/` 命令补全列表时，按 `Enter` 键直接等同于 `Tab` 键完成补全填充。
+  - 统一 `_set_busy` 管理机制，修复输入 `?` 或 `help` 导致终端卡在 `processing...` 的状态同步问题。
+
+- **测试套件扩展**（`tests/test_tui_layout.py`）：
+  - 涵盖组件挂载、标签循环切换、Rich 渲染、提供商与 host 解析、方括号转义及状态栏同步。
+  - 全量 104 项单元测试全部通过。
+

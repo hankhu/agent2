@@ -70,9 +70,13 @@ class BaseLLM(ABC):
         temperature: float = 0.7,
         max_tokens: int = 4096,
         context_window: int | None = None,
+        provider: str | None = None,
+        base_url: str | None = None,
         **kwargs: Any,
     ) -> None:
         self.model = model
+        self.provider = provider
+        self.base_url = base_url
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.context_window = context_window or guess_context_window(model)

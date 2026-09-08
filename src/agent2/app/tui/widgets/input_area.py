@@ -39,6 +39,9 @@ class ChatInput(TextArea):
             super().__init__()
             self.key = key
 
+    class CycleTabRequested(Message):
+        """Posted when user presses Tab while input is empty to cycle tabs."""
+
     def __init__(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(
             language="markdown",
@@ -67,26 +70,31 @@ class ChatInput(TextArea):
                 event.stop()
                 return
 
+        # ── Tab on empty input: cycle top tabs ─────────────────
+        if not self.show_completion and not self.text.strip() and event.key == "tab":
+            self.post_message(self.CycleTabRequested())
+            event.prevent_default()
+            event.stop()
+            return
+
         # ── Completion navigation ───────────────────────────────
         if self.show_completion and event.key in ("tab", "up", "down", "escape"):
             if event.key in ("up", "down"):
-                # Remember that the user actively picked an item: Enter will
-                # then accept the highlighted command instead of submitting.
                 self._completion_navigated = True
             self.post_message(self.CompletionKey(event.key))
             event.prevent_default()
             event.stop()
             return
 
-        # Enter accepts the highlighted completion only after the user
-        # navigated the list; a plain Enter on a typed command line
-        # (e.g. "/help") still submits it.
-        if self.show_completion and event.key == "enter" and self._completion_navigated:
-            self._completion_navigated = False
-            self.post_message(self.CompletionKey("enter"))
-            event.prevent_default()
-            event.stop()
-            return
+        if self.show_completion and event.key == "enter":
+            from agent2.app.tui.screens.chat import SLASH_COMMANDS
+            exact_cmds = {cmd for cmd, _ in SLASH_COMMANDS}
+            if self._completion_navigated or self.text.strip() not in exact_cmds:
+                self._completion_navigated = False
+                self.post_message(self.CompletionKey("enter"))
+                event.prevent_default()
+                event.stop()
+                return
 
         # ── History navigation (Up/Down) ───────────────────────
         if not self.show_completion and event.key == "up" and self._history:

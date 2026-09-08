@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.3.10 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.12 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -147,15 +147,18 @@
     - **Ask 模式** (`/ask`)：
       - 只读问答与代码分析模式，**严格禁用所有写和执行操作**（禁用 `file_write`、`shell_exec`、`python_exec` 等）。
       - 并在 Tool Schema 注入与 Agent 执行拦截层面做双重安全防护。
-  - **底部状态栏模式徽标指示 (Mode Badge)** — 视窗底部状态栏动态展示 `[AGENT]` (绿色)、`[PLAN]` (黄色)、`[ASK]` (青色) 模式标签，置于输入框之下单行平铺。
+  - **Copilot CLI 风格现代极简布局**：
+    - **顶部导航栏 (`TopTabBar`)** — 水平排列 `Current`、`Sessions`、`Help` 紧凑标签，支持鼠标直达、快捷键（`F1`/`F2`/`F3`）以及输入框为空时按 `Tab` 键循环切换。
+    - **极简欢迎横幅 (`WelcomeBanner`)** — 空会话呈现居中 ASCII Mascot 图标、免责声明与动态轮播的 Tip 指引卡片，并在 `/clear` 后优雅恢复。
+    - **独立帮助模态浮层 (`HelpScreen`)** — 集中展示运行模式、按键绑定、斜杠命令与上下文注入语法，支持 `?` / `/help` 快捷打开。
+    - **双层状态栏 (`ContextBar` + `StatusBar`)** — 紧贴输入框上方的 `ContextBar` 呈现工作目录、执行 Spinner、Token 用量与模型提供商；底端单行 `StatusBar` 呈现导航指引与模式徽标（`[AGENT]` / `[PLAN]` / `[ASK]`）。
+  - **模型提供商与 Host 智能识别** — 自动解析底层 LLM 提供商标签（如 `[deepseek] deepseek-chat`）；对于私有代理、内网网关或局域网 IP，智能选用 `base_url` 的 host（如 `[localhost:11434] llama3.1`）并完成 Rich Markup 括号转义。
+  - **现代全屏交互视窗**：
+    - **会话管理视窗 (`SessionSelectScreen` / `/sessions`)** — 全屏极简设计，支持实时关键词过滤搜索、全宽亮蓝高光选框、`↑`/`↓` 键盘导航、`e` 重命名、`d` 删除会话、`Enter` 恢复会话。
+    - **模型选择视窗 (`ModelSelectScreen` / `/model`)** — 全屏极简设计，提供顶栏联动、模型分组、全宽亮蓝高光条、即打即搜与自定义模型 identifier 直达。
+  - **斜杠命令菜单快速确认** — 输入 `/` 弹出命令自动补全菜单时，按 `Enter` 键直接等同于 `Tab` 键完成补全填充。
   - **全扁平极简无边框 UI 风格 (Flat Borderless Design)** — 彻底移除所有界面边框线（`border: none`）与不必要的内衬距/外边距，全屏采用现代无边框贴合、极简色块底色与零间距边缘平铺。
-  - **会话管理模态框 (`SessionSelectScreen` / `/sessions`)** — `/sessions`（或 `/resume`）弹出交互式会话管理面板：
-    - `Enter`: 一键恢复选中的历史会话。
-    - `e` / `r`: 就地重命名选中会话标题并持久化。
-    - `d`: 快捷删除不需要的会话。
-    - `Esc`: 关闭面板。
   - **会话快捷重命名 (`/rename`)** — `/rename <new-title>` 快速修改当前会话名称并持久化保存。
-  - **下拉式模型选择器 (`ModelSelectScreen` / `Select[str]`)** — 采用类似 drop-down menu 的紧凑下拉选择框替代大表格，按 Enter 展开下拉选项列表，支持即打即搜与自定义模型直接输入。
   - **用户消息即时挂载渲染** — 消息提交后立即在 DOM 中挂载并刷新贴底渲染，免除等待模型网络请求响应的停顿感。
   - **流式嵌入确认卡片 (`ConfirmCard` / HITL 审批)** — 工具审批从独立弹层改为自然嵌入消息流的紧凑卡片：
     - 工具名称与参数单行紧凑排版，配合清晰颜色区分。

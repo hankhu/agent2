@@ -82,6 +82,115 @@ def _is_local_or_lan(url: str | None) -> bool:
         return False
 
 
+KNOWN_PROVIDERS: frozenset[str] = frozenset({
+    "openai",
+    "deepseek",
+    "anthropic",
+    "claude",
+    "ollama",
+    "gemini",
+    "google",
+    "azure",
+    "groq",
+    "openrouter",
+    "nvidia",
+    "siliconflow",
+    "moonshot",
+    "kimi",
+    "zhipu",
+    "glm",
+    "dashscope",
+    "qwen",
+    "aliyun",
+    "minimax",
+    "together",
+    "mistral",
+    "bedrock",
+    "aws",
+    "cloudflare",
+    "perplexity",
+    "github",
+    "cohere",
+    "baichuan",
+    "yi",
+    "lingyi",
+    "stepfun",
+    "volcengine",
+    "doubao",
+    "vllm",
+    "lmstudio",
+    "huggingface",
+    "replicate",
+    "novita",
+    "fireworks",
+    "anyscale",
+    "sambanova",
+    "cerebras",
+    "ai21",
+})
+
+GENERIC_PROVIDERS: frozenset[str] = frozenset({
+    "",
+    "default",
+    "custom",
+    "unknown",
+    "none",
+    "config.models",
+    "config.providers",
+    "config.default",
+    "preset",
+})
+
+
+def extract_host(url: str | None) -> str:
+    """Extract host string (hostname[:port]) from a URL or endpoint string."""
+    if not url:
+        return ""
+    u = url.strip()
+    if not u or u.lower() in ("default endpoint", "default", "none"):
+        return ""
+    if "://" not in u:
+        u = f"http://{u}"
+    try:
+        from urllib.parse import urlsplit
+
+        p = urlsplit(u)
+        hostname = p.hostname or ""
+        if p.port and p.port not in (80, 443):
+            return f"{hostname}:{p.port}" if hostname else p.netloc
+        return hostname or p.netloc
+    except Exception:
+        return ""
+
+
+def resolve_provider_or_host(
+    provider: str | None = None,
+    base_url: str | None = None,
+) -> str:
+    """Resolve model provider name or fallback to base_url host.
+
+    If provider is explicitly specified (and not a generic placeholder),
+    it is returned. If provider is absent or generic, attempts to determine
+    the provider from base_url. If it cannot be determined, returns the host
+    of base_url.
+    """
+    if provider:
+        p = provider.strip()
+        if p.lower() not in GENERIC_PROVIDERS:
+            return p
+
+    host = extract_host(base_url)
+    if host:
+        candidate = _provider_from_url(base_url)
+        if candidate and candidate.lower() in KNOWN_PROVIDERS:
+            return candidate.lower()
+        return host
+
+    if provider and provider.strip().lower() not in GENERIC_PROVIDERS:
+        return provider.strip()
+    return ""
+
+
 def _provider_from_url(url: str | None) -> str:
     """Extract a short provider name from a base URL.
 
@@ -152,7 +261,7 @@ def get_available_models() -> list[dict[str, Any]]:
                 "name": name,
                 "model": entry.get("model_id") or entry.get("model", name),
                 "base_url": base_url,
-                "provider": provider_name or _provider_from_url(base_url),
+                "provider": resolve_provider_or_host(provider_name, base_url),
                 "api_key": api_key,
                 "source": "config.models",
             })
@@ -165,7 +274,7 @@ def get_available_models() -> list[dict[str, Any]]:
                     "name": name,
                     "model": name,
                     "base_url": base_url,
-                    "provider": entry,
+                    "provider": resolve_provider_or_host(entry, base_url),
                     "api_key": api_key,
                     "source": "config.models",
                 })
@@ -175,7 +284,7 @@ def get_available_models() -> list[dict[str, Any]]:
                     "name": name,
                     "model": entry,
                     "base_url": base_url,
-                    "provider": _provider_from_url(base_url),
+                    "provider": resolve_provider_or_host(None, base_url),
                     "api_key": cfg.llm.api_key,
                     "source": "config.models",
                 })
@@ -188,7 +297,7 @@ def get_available_models() -> list[dict[str, Any]]:
                 "name": p_name,
                 "model": p_name,
                 "base_url": base_url,
-                "provider": p_name,
+                "provider": resolve_provider_or_host(p_name, base_url),
                 "api_key": p_cfg.api_key,
                 "source": "config.providers",
             })
@@ -201,7 +310,7 @@ def get_available_models() -> list[dict[str, Any]]:
             "name": "default",
             "model": default_model,
             "base_url": base_url,
-            "provider": _provider_from_url(base_url),
+            "provider": resolve_provider_or_host(None, base_url),
             "api_key": cfg.llm.api_key,
             "source": "config.default",
         })
@@ -221,7 +330,7 @@ def get_available_models() -> list[dict[str, Any]]:
             "name": "ollama",
             "model": "llama3.1",
             "base_url": "http://localhost:11434/v1",
-            "provider": "localhost",
+            "provider": "ollama",
             "api_key": "ollama",
             "source": "preset",
         })

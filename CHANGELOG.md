@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.3.12] - 2026-09-08
+
+### Added
+- **Copilot CLI 风格现代极简 TUI 架构**：
+  - 顶部导航栏 `TopTabBar`：包含 `Current`、`Sessions`、`Help` 紧凑标签，支持点击、快捷键（F1/F2/F3）与输入为空时按 `Tab` 键循环切换
+  - 极简欢迎横幅 `WelcomeBanner`：呈现 ASCII Mascot 图标、系统免责声明与动态轮播的 Tip 卡片（`/plan`、`/ask`、`#file` 等），支持 `/clear` 后优雅恢复
+  - 独立帮助浮层 `HelpScreen`：集中展示运行模式、按键绑定、斜杠命令与上下文语法，支持 `?` / `help` 快捷调出
+- **全屏极简视窗交互**：
+  - 会话管理视窗 `SessionSelectScreen`：全宽亮蓝高光选框、实时关键词搜索过滤、`↑`/`↓` 键盘导航、`e` 重命名、`d` 删除、`Enter` 恢复会话
+  - 模型选择器 `ModelSelectScreen`：顶栏联动、全宽高亮选中条、即打即搜过滤与自定义模型回车直达
+- **模型提供商与 Host 智能识别**：
+  - 模型选择列表与状态栏统一显示提供商标识（`[provider] model_name`）
+  - 若无法确定提供商（如私有网关或局域网 IP），自动提取并选用 `base_url` 的 host（如 `[localhost:11434] llama3.1`）
+  - 完善 Rich Markup 括号转义，避免方括号标签被误解析丢失
+- **状态栏与上下文栏拆分优化**：
+  - `ContextBar`（输入框上方）：显示当前工作目录/执行状态 Spinner、Session Token 用量、上下文占比及模型与提供商
+  - `StatusBar`（终端底行）：显示全局快捷键指引与当前交互模式徽标（`[AGENT]` / `[PLAN]` / `[ASK]`）
+- 新增单元测试套件 `test_tui_layout.py`，全量 104 项测试 100% 通过
+
+### Changed
+- 斜杠命令补全菜单：弹出时按 `Enter` 键等同于 `Tab` 键快速确认补全
+- 统一 `_set_busy` 状态管理，修复输入 `?` / `help` 导致终端卡在 `processing...` 的状态同步问题
+
 ## [0.1.3.11] - 2026-09-04
 
 ### Added
