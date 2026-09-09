@@ -8,6 +8,7 @@ import uuid
 from typing import Any, Self
 
 from textual.app import App
+from textual.binding import Binding
 
 from agent2.agent.base import BaseAgent
 from agent2.agent.react import ReActAgent
@@ -368,6 +369,11 @@ class Agent2App(App):  # type: ignore[type-arg]
 
     CSS = APP_CSS
     TITLE = "Agent2 TUI"
+
+    BINDINGS = [
+        *App.BINDINGS,
+        Binding("ctrl+z,ctrl-z", "suspend_process", "Suspend", priority=True, show=False),
+    ]
 
     def __init__(
         self,

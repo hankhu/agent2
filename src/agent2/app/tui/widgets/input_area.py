@@ -134,6 +134,8 @@ class ChatInput(TextArea):
             elif self._history_index > 0:
                 self._history_index -= 1
             self.text = self._history[self._history_index]
+            lines = self.text.splitlines()
+            self.cursor_location = (len(lines) - 1, len(lines[-1])) if lines else (0, 0)
             event.prevent_default()
             event.stop()
             return
@@ -145,6 +147,8 @@ class ChatInput(TextArea):
             else:
                 self._history_index = None
                 self.text = self._draft
+            lines = self.text.splitlines()
+            self.cursor_location = (len(lines) - 1, len(lines[-1])) if lines else (0, 0)
             event.prevent_default()
             event.stop()
             return
@@ -153,7 +157,7 @@ class ChatInput(TextArea):
         if event.key == "enter":
             text = self.text.strip()
             if text:
-                if not text.startswith("/") and (not self._history or self._history[-1] != text):
+                if not self._history or self._history[-1] != text:
                     self._history.append(text)
                 self._history_index = None
                 self._draft = ""
@@ -164,4 +168,6 @@ class ChatInput(TextArea):
             return
 
         # ── Default TextArea handling for everything else ───────
+        if event.key not in ("up", "down", "enter", "tab"):
+            self._history_index = None
         await super()._on_key(event)

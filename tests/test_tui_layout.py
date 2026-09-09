@@ -362,3 +362,82 @@ async def test_sync_status_bar_syncs_provider() -> None:
         sb = screen.query_one(StatusBar)
         assert cb.provider == "deepseek"
         assert sb.provider == "deepseek"
+
+
+@pytest.mark.asyncio
+async def test_chat_input_history_supports_slash_commands() -> None:
+    """Ensure ChatInput records slash commands in history and allows navigating them."""
+    from agent2.app.tui.app import TUIReActAgent
+    from agent2.app.tui.widgets.input_area import ChatInput
+    from unittest.mock import AsyncMock
+
+    agent = TUIReActAgent(llm=DummyLLM())
+    app = Agent2App(agent=agent)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        inp = app.screen.query_one(ChatInput)
+        inp.focus()
+
+        # Submit normal text
+        inp.text = "hello world"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        # Submit slash commands
+        inp.text = "/yolo"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        inp.text = "/yolo on"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        # History should contain all submitted items
+        assert inp._history == ["hello world", "/yolo", "/yolo on"]
+
+        # Navigate up
+        await pilot.press("up")
+        await pilot.pause()
+        assert inp.text == "/yolo on"
+        assert not inp.show_completion
+
+        await pilot.press("up")
+        await pilot.pause()
+        assert inp.text == "/yolo"
+        assert not inp.show_completion
+
+        await pilot.press("up")
+        await pilot.pause()
+        assert inp.text == "hello world"
+
+        # Navigate down
+        await pilot.press("down")
+        await pilot.pause()
+        assert inp.text == "/yolo"
+
+        await pilot.press("down")
+        await pilot.pause()
+        assert inp.text == "/yolo on"
+
+        await pilot.press("down")
+        await pilot.pause()
+        assert inp.text == ""
+
+
+@pytest.mark.asyncio
+async def test_agent2_app_ctrl_z_suspend() -> None:
+    """Ensure Ctrl+Z and Ctrl-Z trigger action_suspend_process."""
+    from unittest.mock import MagicMock
+    from agent2.app.tui.app import TUIReActAgent
+
+    agent = TUIReActAgent(llm=DummyLLM())
+    app = Agent2App(agent=agent)
+    app.action_suspend_process = MagicMock()
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+z")
+        assert app.action_suspend_process.call_count == 1
+        await pilot.press("ctrl-z")
+        assert app.action_suspend_process.call_count == 2
+

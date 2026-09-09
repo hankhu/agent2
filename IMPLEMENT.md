@@ -551,6 +551,19 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 - **两段式删除**：`SessionSearchInput` 将 `ctrl+x` 映射为 `DeleteArmRequested`，armed 态下 `x` / `X` / `shift+x` 映射为 `DeleteRequested`；`SessionSelectScreen._delete_armed` 控制 armed 状态并实时更新 `#session-hint` 文案。
 - **Rich Markup 转义**：`session.py` 预览与 `tool_card.py` 标题统一使用 `rich.markup.escape`，防止用户内容中的方括号破坏样式解析。
 
+### 6.25 会话删除保持选中、斜杠命令历史与 Ctrl-Z 挂起后台 (`session_select.py` / `input_area.py` / `screens/chat.py` / `app.py`)
+
+- **会话删除保持选中位置**：
+  - `SessionSelectScreen._populate_options(query, highlight_index=0)` 通过 `idx = max(0, min(highlight_index, len(self._filtered_sessions) - 1))` 约束并应用高亮，替换此前强制 `highlighted = 0` 的逻辑。
+  - `action_delete_session()` 在从 `_sessions` 移除 target 前读取当前高亮行 `h`，删除后调用 `_populate_options(inp.value, highlight_index=h)`。若删除的是末尾项，`min` 运算自然将其钳位在新的末尾项，使列表在行删除后焦点稳定停留在原地。
+- **聊天历史包含斜杠命令**：
+  - `ChatInput.on_key` 移除 `not text.startswith("/")` 拦截条件，使得如 `/model`、`/clear` 等所有提交的指令均沉淀至 `self._history`，支持连续去重与 ↑ / ↓ 快速调取。
+  - 调出历史记录时，根据 `self.text.splitlines()` 自动将光标定位于末尾行最后一列 `(len(lines) - 1, len(lines[-1]))`，便于用户追加参数或直接回车。
+  - 在 `ChatScreen.on_text_area_changed` 中检测 `chat_input._history_index is not None` 时立即 `self._hide_completion()` 并返回，杜绝历史翻阅中的斜杠指令误触发补全浮层并截获方向键。用户后续键入其它键时将 `_history_index` 复位为 `None`，正常恢复补全菜单。
+- **Ctrl-Z 挂起进程**：
+  - `Agent2App` 增加全局 `priority=True` 的快捷键 `Binding("ctrl+z,ctrl-z", "suspend_process", "Suspend", priority=True, show=False)`。
+  - 利用 Textual 的 App-level 优先绑定分发机制，越过下层输入框的 undo 行为直接调度 `App.action_suspend_process()`，向进程发送 `SIGTSTP` 实现标准终端后台挂起。终端运行 `fg` 即发 `SIGCONT` 恢复界面。
+
 ---
 
 ## 7. 异步设计

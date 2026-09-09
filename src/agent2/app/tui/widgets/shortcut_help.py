@@ -11,7 +11,7 @@ SHORTCUT_HELP_TEXT = """\
 [green]Tab[/green] next  ·  [green]Shift+Tab[/green] previous
 [green]?[/green] shortcuts  ·  [green]+[/green] sessions  ·  [green]/[/green] commands
 [green]Esc[/green] close/cancel  ·  [green]Ctrl+C[/green] interrupt
-[green]Ctrl+O[/green] results  ·  [green]Ctrl+D[/green] quit
+[green]Ctrl+O[/green] results  ·  [green]Ctrl+D[/green] quit  ·  [green]Ctrl+Z[/green] bg
 
 [bold cyan]Sessions panel[/bold cyan]
 ↑/↓ select  ·  Enter resume  ·  e/r rename

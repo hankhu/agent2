@@ -343,3 +343,26 @@
 - **测试**：
   - 更新 `tests/test_context.py`、`test_tui_layout.py`、`test_session_preview.py`、`test_yolo_allow_all.py` 以匹配三档顶栏、`?` 面板与两段式删除。
   - 全量 166 项测试全部通过。
+
+---
+
+## 25. 会话删除保持选中位置、斜杠命令历史与 Ctrl-Z 挂起后台 (v0.1.3.15)
+
+- **会话删除保持选中位置**（`screens/session_select.py`）：
+  - `SessionSelectScreen._populate_options(query, highlight_index=0)`：引入 `highlight_index` 形参，并使用 `idx = max(0, min(highlight_index, len(self._filtered_sessions) - 1))` 进行范围截断保护，替代以往硬编码的 `highlighted = 0`。
+  - `action_delete_session()`：在移除会话前记录当前高亮行 `h`，删除数据并更新 `_sessions` 后调用 `_populate_options(inp.value, highlight_index=h)`，使选中行停留在删除位置；若删除的是末尾项则平滑向上回退至新的末尾项。
+
+- **聊天历史支持 `/` 命令与光标行尾**（`widgets/input_area.py` / `screens/chat.py`）：
+  - `ChatInput._on_key`：去除 `if not text.startswith("/")` 限制，斜杠命令（`/model`、`/clear` 等）与常规聊天文本一并纳入历史列表并支持连续去重。
+  - 调出历史记录（Up/Down）时，通过 `lines = self.text.splitlines()` 将 `cursor_location` 置于末尾 `(len(lines) - 1, len(lines[-1]))`，符合终端 readline 惯性。
+  - 历史浏览防拦截保护：在 `ChatScreen.on_text_area_changed` 中，检测到 `_history_index is not None` 时立即调用 `_hide_completion()` 并提前返回，避免历史回退中的 `/` 命令弹出补全面板截获后续的上下箭头键。当用户键入其它字符时重置 `_history_index = None`，无缝恢复斜杠补全。
+
+- **Ctrl-Z 挂起进程至后台**（`app.py` / `screens/help.py` / `widgets/shortcut_help.py`）：
+  - 在 `Agent2App` 增加全局 `priority=True` 的 `Binding("ctrl+z,ctrl-z", "suspend_process", "Suspend", priority=True, show=False)`。
+  - 触发 Textual 内建 `action_suspend_process()`，向进程发送 `SIGTSTP` 挂起进入后台，用户在终端运行 `fg` 即可恢复运行。
+  - 同步更新 `HelpScreen` 与 `ShortcutHelp` 中的按键说明。
+
+- **测试**：
+  - `tests/test_session_preview.py`：新增 `test_session_delete_preserves_highlight_index`，覆盖三会话中删除中间项后的高亮索引保持验证。
+  - `tests/test_tui_layout.py`：新增 `test_chat_input_history_supports_slash_commands` 与 `test_agent2_app_ctrl_z_suspend`。
+  - 全量 169 项自动化测试全部通过。

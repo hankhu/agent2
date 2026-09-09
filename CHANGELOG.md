@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.3.15] - 2026-09-10
+
+### Added
+- **支持 `Ctrl-Z` 进程挂起切换到后台**：
+  - 在 `Agent2App` 配置全局高优先级快捷键 `ctrl+z,ctrl-z`（`priority=True`），绑定到 Textual 原生 `suspend_process` 动作（向进程发送 `SIGTSTP`，在终端中输入 `fg` 即可无缝唤醒恢复）。
+  - `HelpScreen` 与内联快捷键面板 `ShortcutHelp` 同步补充 `Ctrl+Z` 挂起后台说明。
+
+### Changed
+- **聊天历史支持 `/` 开头的命令**：
+  - `ChatInput` 移除提交时对以 `/` 开头命令的过滤限制，所有提交的斜杠命令与普通文本一致记录到输入历史，按 ↑ / ↓ 方向键可无缝回溯。
+  - 调出历史记录时光标自动移动至行尾，便于快速编辑。
+  - 翻阅历史期间（`_history_index is not None`）在 `ChatScreen.on_text_area_changed` 中主动收起补全浮层，防止补全浮层拦截方向键导致历史回溯卡死。
+
+### Fixed
+- **会话删除后选中位置保持不变**：
+  - `SessionSelectScreen._populate_options` 接收并维护 `highlight_index`，在有效范围 `[0, len(_filtered_sessions) - 1]` 内校准，避免列表重绘时强制跳回第 0 项。
+  - `action_delete_session()` 删除后将删除前记录的高亮位置 `h` 传入 `_populate_options`，删除后光标停留在原地（如删除最后一项则安全停留在新的末尾项）。
+
 ## [0.1.3.14] - 2026-09-09
 
 ### Added

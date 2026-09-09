@@ -275,7 +275,7 @@ class SessionSelectScreen(ModalScreen[str]):
         elif event.option_index is not None and 0 <= event.option_index < len(self._filtered_sessions):
             self._show_preview(str(self._filtered_sessions[event.option_index].get("id", "")))
 
-    def _populate_options(self, query: str = "") -> None:
+    def _populate_options(self, query: str = "", highlight_index: int = 0) -> None:
         q = query.strip().lower()
         if q:
             self._filtered_sessions = [
@@ -306,9 +306,10 @@ class SessionSelectScreen(ModalScreen[str]):
             line = f"  {title:<35}  [dim]·  {sid}  ·  {time_str}[/dim]"
             opt_list.add_option(Option(line, id=str(s.get("id", ""))))
 
-        opt_list.highlighted = 0
-        first_id = str(self._filtered_sessions[0].get("id", ""))
-        self._show_preview(first_id)
+        idx = max(0, min(highlight_index, len(self._filtered_sessions) - 1))
+        opt_list.highlighted = idx
+        selected_id = str(self._filtered_sessions[idx].get("id", ""))
+        self._show_preview(selected_id)
 
     def action_cycle_tab_next(self) -> None:
         self.query_one(TopTabBar).cycle_tab(1)
@@ -454,7 +455,7 @@ class SessionSelectScreen(ModalScreen[str]):
                 return
 
             inp = self.query_one("#session-search", SessionSearchInput)
-            self._populate_options(inp.value)
+            self._populate_options(inp.value, highlight_index=h)
 
     def action_cancel_or_close(self) -> None:
         if self._delete_armed:

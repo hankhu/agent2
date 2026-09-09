@@ -121,3 +121,45 @@ async def test_session_select_screen_preview_and_delete(tmp_path: Path) -> None:
         remaining = sm.list_sessions()
         assert len(remaining) == 1
         assert remaining[0]["id"] == "sess_2"
+
+
+@pytest.mark.asyncio
+async def test_session_delete_preserves_highlight_index(tmp_path: Path) -> None:
+    """Verify that deleting a session keeps the selected position unchanged."""
+    sm = SessionManager(session_dir=tmp_path)
+    sm.save("sess_1", {"messages": [{"role": "user", "content": "1"}]}, title="Session One")
+    sm.save("sess_2", {"messages": [{"role": "user", "content": "2"}]}, title="Session Two")
+    sm.save("sess_3", {"messages": [{"role": "user", "content": "3"}]}, title="Session Three")
+
+    sessions = sm.list_sessions()
+    assert len(sessions) == 3
+
+    screen = SessionSelectScreen(sessions=sessions, session_manager=sm)
+    app = Agent2App(agent=TUIReActAgent(llm=DummyLLM()), session_manager=sm)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.app.push_screen(screen)
+        await pilot.pause()
+
+        opt_list = screen.query_one("#session-list", OptionList)
+        assert opt_list.highlighted == 0
+
+        # Move to index 1 (Session Two)
+        await pilot.press("down")
+        await pilot.pause()
+        assert opt_list.highlighted == 1
+
+        # Delete session at index 1
+        await pilot.press("ctrl+x")
+        await pilot.pause()
+        await pilot.press("x")
+        await pilot.pause()
+
+        # Remaining sessions are 2 (Session Three, Session One)
+        remaining = sm.list_sessions()
+        assert len(remaining) == 2
+        # Selected position should remain 1 (now Session One)
+        assert opt_list.highlighted == 1
+        preview_w = screen.query_one("#session-preview-content", Static)
+        assert "Session One" in preview_w.content
+

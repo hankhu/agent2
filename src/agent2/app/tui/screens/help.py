@@ -23,6 +23,7 @@ HELP_MARKDOWN = """
 - **Ctrl+C**: Interrupt agent generation or tool execution
 - **Ctrl+O**: Toggle tool execution results expand/collapse
 - **Ctrl+D**: Save session and exit
+- **Ctrl+Z**: Suspend to background
 - **Esc**: Close popup dialog / cancel message selection
 
 ### 🛠️ Slash Commands

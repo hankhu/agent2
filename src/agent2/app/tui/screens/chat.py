@@ -419,6 +419,10 @@ class ChatScreen(Screen):
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         """Show / update / hide the completion list as the user types."""
+        chat_input = self.query_one("#chat-input", ChatInput)
+        if getattr(chat_input, "_history_index", None) is not None:
+            self._hide_completion()
+            return
         text = event.text_area.text
         if text:
             try:
