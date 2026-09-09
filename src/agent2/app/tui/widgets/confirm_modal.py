@@ -71,24 +71,29 @@ class ConfirmCard(Vertical):
                 yield DiffView(diff, filename=str(self._arguments.get("path", "")))
 
         with Horizontal(id="confirm-buttons"):
-            yield Button("[green][y] Approve[/green]", id="approve")
+            yield Button("[green][1/y] Approve once[/green]", id="approve_once")
+            yield Button("[cyan][c] In conversation[/cyan]", id="approve_conversation")
+            yield Button("[blue][p] In project[/blue]", id="approve_project")
+            yield Button("[yellow][a] Always approve[/yellow]", id="always")
             yield Button("[red][n] Reject[/red]", id="reject")
-            yield Button("[yellow][a] Always Allow[/yellow]", id="always")
 
     def on_mount(self) -> None:
         try:
-            self.query_one("#approve", Button).focus()
+            btn = self.query(Button).first()
+            if btn:
+                btn.focus()
         except Exception:
             pass
 
     # ── focus navigation & shortcuts ────────────────────────────
 
     def _focus_relative_button(self, delta: int) -> None:
-        buttons = [
-            self.query_one("#approve", Button),
-            self.query_one("#reject", Button),
-            self.query_one("#always", Button),
-        ]
+        try:
+            buttons = list(self.query_one("#confirm-buttons", Horizontal).query(Button))
+        except Exception:
+            return
+        if not buttons:
+            return
         cur_idx = 0
         for idx, btn in enumerate(buttons):
             if btn.has_focus:
@@ -106,16 +111,21 @@ class ConfirmCard(Vertical):
         elif event.key in ("right", "l"):
             event.stop()
             self._focus_relative_button(1)
-        elif event.key == "y":
+        elif event.key in ("1", "y"):
             event.stop()
-            self.submit_decision("approve")
-        elif event.key == "n":
-            event.stop()
-            self.submit_decision("reject")
-        elif event.key == "a":
+            self.submit_decision("approve_once" if self._tool_name != "max_iterations" else "approve")
+        elif event.key in ("2", "c"):
+            if self._tool_name != "max_iterations":
+                event.stop()
+                self.submit_decision("approve_conversation")
+        elif event.key in ("3", "p"):
+            if self._tool_name != "max_iterations":
+                event.stop()
+                self.submit_decision("approve_project")
+        elif event.key in ("4", "a"):
             event.stop()
             self.submit_decision("always")
-        elif event.key == "escape":
+        elif event.key in ("n", "escape"):
             event.stop()
             self.submit_decision("reject")
 
@@ -137,8 +147,15 @@ class ConfirmCard(Vertical):
             pass
 
         badge_map = {
-            "approve": "[bold green]✓ Approved[/bold green]",
-            "always": "[bold yellow]✓ Always Allowed[/bold yellow]",
+            "approve_once": "[bold green]✓ Approved once[/bold green]",
+            "once": "[bold green]✓ Approved once[/bold green]",
+            "approve": "[bold green]✓ Approved once[/bold green]",
+            "approve_conversation": "[bold cyan]✓ Approved in conversation[/bold cyan]",
+            "conversation": "[bold cyan]✓ Approved in conversation[/bold cyan]",
+            "approve_project": "[bold blue]✓ Approved in project[/bold blue]",
+            "project": "[bold blue]✓ Approved in project[/bold blue]",
+            "always": "[bold yellow]✓ Always approved[/bold yellow]",
+            "approve_always": "[bold yellow]✓ Always approved[/bold yellow]",
             "reject": "[bold red]✗ Rejected[/bold red]",
         }
         if self._tool_name == "max_iterations":

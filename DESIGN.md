@@ -129,6 +129,62 @@ ChatScreen (Dispatcher)
 - **门面分发**：`ChatScreen` 集中管理交互状态机，根据当前交互模式将用户意图路由至相应的推理或调度管线。
 - **只读沙箱双重防护**：在 Ask 模式下，同时在提示词注入、LLM Tool Schema 列表和运行时工具拦截三层设防，严格确保零文件修改与零进程执行风险。
 
+### 2.8 上下文与技能加载模式 — Context / Skills
+
+```
+~/.config/agent2/rules/*.md  ─┐
+~/.agent2/rules/*.md         ─┼─▶ load_rules() ─▶ Context.rules_text
+<project>/.agent2/rules/*.md ─┘
+
+~/.agent2/skills/<name>/SKILL.md      ─┐
+~/.claude/skills/<name>/SKILL.md      ─┼─▶ discover_skills() ─▶ Context.skills
+<project>/.agents/skills/<name>/SKILL.md ─┘        │
+                                                   ▼
+                                    Context.build_system_prompt(base)
+                                                   │
+                                                   ▼
+                                          <rules> / <skills> 注入 system prompt
+```
+
+- **Rules 与 Skills 分层注入**：Rules 是短文本约束，Skills 是完整 `SKILL.md` 指令包；两者统一由 `Context` 聚合后注入 system prompt。
+- **发现优先级**：全局目录先扫描、项目目录后扫描，同名 Skill 由后扫描目录覆盖，便于项目级定制。
+- **按需调用**：除自动注入外，TUI / CLI 均支持 `/skills` 浏览与 `/<skill_name>` 动态调用，避免所有技能内容无条件占据上下文。
+
+### 2.9 MCP 工具桥接模式
+
+```
+config.json: mcp_servers
+        │
+        ▼
+   MCPManager.connect()
+        │  stdio / SSE
+        ▼
+   MCP ClientSession ── list_tools() ──▶ MCP tool schema
+        │
+        ▼
+   _make_mcp_tool() ──▶ agent2 Tool 实例
+        │
+        ▼
+   ToolRegistry / Agent 透明调用
+```
+
+- **协议适配层**：MCP server 的 `inputSchema` 被转换为 agent2 `ToolSchema`，MCP 返回的 content blocks 合并为字符串结果。
+- **生命周期管理**：`MCPManager` 持有 stdio transport 与 `ClientSession` 的 context manager，`close()` 逆序清理，避免子进程泄漏。
+- **可选依赖**：`mcp` 作为 optional dependency，未安装时 MCP 功能静默降级，不影响核心 Agent 运行。
+
+### 2.10 多级工具审批作用域模式
+
+```
+is_tool_approved(tool)
+    ├── conversation_approved  (内存 Set)
+    ├── <project>/.agent2/approvals.json
+    └── ~/.config/agent2/approvals.json
+```
+
+- **四级审批语义**：`once`（仅本次）、`conversation`（当前会话内存）、`project`（项目级文件）、`always`（全局文件）。
+- **确认卡即状态机**：`ConfirmCard` 从“批准/拒绝”扩展为五档按钮，并映射 `1/y`、`2/c`、`3/p`、`4/a`、`n/Esc` 快捷键。
+- **自动审批开关**：YOLO / Allow-all 可在审批检查前短路，YOLO 额外注入自主决策 system prompt。
+
 ---
 
 ## 3. 数据流
@@ -275,8 +331,8 @@ synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
 ### 4.8 极简 Copilot CLI 风格 TUI 视窗与模型/Host 智能解析
 
 - **现代极简多视窗体系**：
-  - **顶部标签栏 (`TopTabBar`)**：`Current`、`Sessions`、`Help` 紧凑水平并排排列，支持鼠标交互、快捷键（`F1`/`F2`/`F3`）以及输入框空白时按 `Tab` 循环切换。
-  - **全屏模态选择系统**：`SessionSelectScreen` 与 `ModelSelectScreen` 统一对齐 Copilot CLI 风格，具备顶栏状态联动、Tip 引导条目、全屏饱和亮蓝高光选条（`#1f6feb`）以及实时多维关键词过滤。
+  - **顶部标签栏 (`TopTabBar`)**：`Current`、`Sessions`、`Skills`、`Help` 紧凑水平并排排列，支持鼠标交互、快捷键（`F1`–`F4`）以及输入框空白时按 `Tab` 循环切换。
+  - **全屏模态选择系统**：`SessionSelectScreen`、`SkillSelectScreen` 与 `ModelSelectScreen` 统一对齐 Copilot CLI 风格，具备顶栏状态联动、Tip 引导条目、全屏饱和亮蓝高光选条（`#1f6feb`）以及实时多维关键词过滤。
 - **智能提供商解析与 Host 优雅降级**：
   - `resolve_provider_or_host(provider, base_url)` 建立自底向上的提供商识别链路：
     1. 显式有效 `provider` 优先；
@@ -285,8 +341,14 @@ synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
     4. 针对 Rich Markup 语法对方括号进行严格转义（`\[provider]`），防止样式标签解析吞没。
 - **输入上下文双状态栏架构**：
   - `ContextBar`（输入框正上方）：聚合当前工作路径、请求 Spinner 耗时、Token 用量与模型提供商标注。
-  - `StatusBar`（终端底行）：轻量展示全局快捷键引导与模式徽标。
+  - `StatusBar`（终端底行）：轻量展示全局快捷键引导与模式徽标（`AGENT` / `PLAN` / `ASK` / `YOLO` / `ALLOW-ALL`）。
 
+### 4.9 Token 用量状态持久化与 Plan 子任务聚合
+
+- **Session 级 usage**：`SessionManager.save()` 持久化 `usage` 字段；`restore_agent()` 恢复时优先读取已保存 usage，旧会话则按消息内容估算，并强制覆盖当前 LLM 计数器。
+- **模型切换保留**：`Agent2App.switch_model()` 在创建新 LLM 实例后回填 `total_usage` / `last_usage`。
+- **Plan 子任务聚合**：`_run_plan_execution()` 为每个 subtask 创建独立 sub-agent，并在 `finally` 中将 `subagent.llm.total_usage` 累加到父会话，失败或取消的子任务也已消耗的 Token 同样计入。
+- **实时同步**：`on_thought_received()`、`on_tool_call_completed()` 及三个 worker 的 `finally` 均调用 `_sync_status_bar()`，保证长任务期间与异常路径下 `ContextBar` 的 Token 计数不归零。
 
 ---
 
@@ -301,6 +363,7 @@ synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
 - **AppConfig**（`pydantic.BaseModel`）：
   - **服务商与模型正交解耦**：采用 `providers`（管理端点与凭据）与 `models`（模型别名与参数）分离的无冗余数据组织方式。
   - **继承与自愈**：同一 Provider 下的多个 Model 自动继承 `base_url` 与 `api_key`；兼容旧版 `llm` 配置。
+  - **Agent 行为配置**：`max_iterations`（默认 50，兼容 `max_turns` / `max_rounds`）、`rules` inline 规则、`mcp_servers` MCP 服务器。
 - **Provider 推导**：从 base_url 智能提取服务商标识（deepseek / nvidia / siliconflow / localhost 等）。
 - **last_model**：文件持久化上次选择，提升交互体验。
 

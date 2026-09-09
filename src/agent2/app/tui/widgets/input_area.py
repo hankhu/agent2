@@ -87,8 +87,12 @@ class ChatInput(TextArea):
             return
 
         if self.show_completion and event.key == "enter":
-            from agent2.app.tui.screens.chat import SLASH_COMMANDS
-            exact_cmds = {cmd for cmd, _ in SLASH_COMMANDS}
+            exact_cmds: set[str]
+            if hasattr(self.screen, "_get_completions"):
+                exact_cmds = {cmd for cmd, _ in self.screen._get_completions()}
+            else:
+                from agent2.app.tui.screens.chat import SLASH_COMMANDS
+                exact_cmds = {cmd for cmd, _ in SLASH_COMMANDS}
             if self._completion_navigated or self.text.strip() not in exact_cmds:
                 self._completion_navigated = False
                 self.post_message(self.CompletionKey("enter"))

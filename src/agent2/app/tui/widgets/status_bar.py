@@ -132,6 +132,8 @@ class StatusBar(Static):
     SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
     mode: reactive[str] = reactive("AGENT")
+    yolo: reactive[bool] = reactive(False)
+    allow_all: reactive[bool] = reactive(False)
     model_name: reactive[str] = reactive("—")
     provider: reactive[str] = reactive("")
     busy: reactive[bool] = reactive(False)
@@ -187,7 +189,13 @@ class StatusBar(Static):
         else:
             mode_badge = "[bold green]AGENT[/bold green]"
 
-        grid.add_row(left, mode_badge)
+        badges = [mode_badge]
+        if self.yolo:
+            badges.append("[bold red]YOLO[/bold red]")
+        elif self.allow_all:
+            badges.append("[bold magenta]ALLOW-ALL[/bold magenta]")
+
+        grid.add_row(left, " ".join(badges))
         return grid
 
 

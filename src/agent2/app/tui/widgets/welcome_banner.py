@@ -38,8 +38,8 @@ class WelcomeBanner(Static):
         cmd, desc = self.tip
         return (
             f" [bright_cyan]┌─┐[/bright_cyan]\n"
-            f" [bright_cyan]│[/bright_cyan] [magenta]\"[/magenta] [bright_cyan]│[/bright_cyan]  [bold]Agent2 v{__version__}[/bold] uses AI.\n"
-            f" [magenta] ▀▀[/magenta]   [dim]Check for mistakes.[/dim]\n\n"
+            f" [bright_cyan]│[/bright_cyan] [magenta]\"[/magenta] [bright_cyan]│[/bright_cyan]  [bold]Agent2 v{__version__}[/bold] is ready to assist.\n"
+            f" [magenta] ▀▀[/magenta]   [dim]Verify outputs for correctness.[/dim]\n\n"
             f" [dodger_blue1]• Tip:[/dodger_blue1] [bold]{cmd}[/bold]\n"
             f"   [dim]└ {desc}[/dim]"
         )

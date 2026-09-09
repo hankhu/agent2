@@ -192,6 +192,7 @@ def main(argv: list[str] | None = None) -> None:
         initial_message=args.i,
         resume_session_id=resume_session_id,
         mode=args.mode,
+        context=getattr(agent, "context", None),
     )
     log_path = session_manager.get_log_path(app.session_id)
     agent.log.log_file = log_path

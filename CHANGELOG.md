@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.1.3.13] - 2026-09-09
+
+### Added
+- **Context 与 Skills 系统** (`agent2/context.py`)：
+  - 自动发现并加载 Rules（`~/.config/agent2/rules`、`~/.agent2/rules`、`.agent2/rules`）与 Skills（`~/.agent2/skills`、`~/.claude/skills`、`.agents/skills` 等），统一注入 Agent 的 system prompt。
+  - 解析 `SKILL.md` 的 YAML frontmatter（`name` / `description`），支持折叠多行描述、无 frontmatter 回退与多目录优先级覆盖。
+  - 新增 TUI Skills 管理视窗 `SkillSelectScreen`、顶栏 `Skills` 标签、`/skills` 命令、动态 `/<skill_name> [prompt]` 调用与斜杠命令补全集成。
+- **MCP (Model Context Protocol) 集成** (`agent2/mcp.py`)：
+  - 新增 `MCPManager`，通过 stdio 连接外部 MCP server，将 server 暴露的 tools 自动包装为 agent2 `Tool` 实例。
+  - `pyproject.toml` 新增可选依赖 `mcp>=1.0`；用户可在 `config.json` 的 `mcp_servers` 中配置多个 server。
+- **多级工具审批作用域** (`agent2/app/approval.py`)：
+  - ConfirmCard 升级为 `Approve once` / `In conversation` / `In project` / `Always approve` / `Reject` 五档审批。
+  - 审批结果按 conversation / project / global 三级持久化到 `.agent2/approvals.json` 或 `~/.config/agent2/approvals.json`。
+  - 新增 `1/y`、`2/c`、`3/p`、`4/a`、`n` / `Esc` 快捷键，Agent 自动读取已授权作用域，减少重复确认。
+- **YOLO / Allow-all 自动审批模式**：
+  - 新增 `/yolo [on|off|show]` 与 `/allow-all [on|off|show]` 命令，自动批准所有工具执行。
+  - YOLO 模式额外向 system prompt 注入自主决策指令，让 LLM 无需向用户提问即可推进任务。
+  - `ContextBar` / `StatusBar` 增加 `YOLO` / `ALLOW-ALL` 状态徽标；TUI 与 Chat CLI 均支持。
+- **最大迭代次数配置化**：
+  - 默认 `max_iterations` 由 `10` 提升至 `50`，支持 `config.json`、`AGENT2_AGENT_MAX_ITERATIONS` 环境变量与构造参数三级优先级。
+  - 兼容旧配置字段 `max_turns` / `max_rounds` 自动迁移为 `max_iterations`。
+- **Session 预览与 Token 用量持久化**：
+  - `SessionManager.list_sessions()` 增加 `message_count` 与 `preview`；会话管理视窗新增右侧预览面板，并支持按预览内容搜索。
+  - 持久化 `usage` 字段；恢复会话、切换模型、Plan 子任务聚合均保留 Token 计数。
+  - Thought / Tool 完成事件实时刷新 `ContextBar`，取消或异常时 `finally` 也会同步状态栏。
+  - 旧会话无 usage 数据时按消息内容 best-effort 估算，并防止上一个会话的计数泄漏到新恢复的会话。
+- **ToolCard 结果标题与折叠体验**：
+  - 工具卡片标题自动显示操作摘要（shell command / python 首行 / 文件路径 / web query 等），运行中显示 `⏳` 且不可折叠。
+  - 成功结果保持紧凑，错误结果额外显示 `❌ Error` 状态行；`Ctrl+O` 批量展开/收起。
+- **Chat CLI 同步增强** (`agent2.app.chat`)：
+  - 同步支持 Rules/Skills 上下文加载、`/skills`、动态技能调用、MCP tools、`/yolo` 与 `/allow-all`。
+
+### Changed
+- 顶层 TUI 标签栏由 `Current` / `Sessions` / `Help` 扩展为 `Current` / `Sessions` / `Skills` / `Help`，快捷键对应 `F1`–`F4`。
+- `BaseAgent.from_dict()` 恢复内置工具时按名称去重，避免重复注册。
+- `SessionManager.save()` 支持顶层 `usage` 字段，并保留已有标题与 usage 回退逻辑。
+- README、FEATURE、DESIGN、IMPLEMENT、memo 文档同步更新。
+
+### Fixed
+- 修复 TUI `ContextBar` 始终显示 `Session: 0 tokens`、恢复会话/切换模型后 Token 计数清零、Plan 子任务 Token 未计入会话总量的问题。
+- 修复 legacy 会话恢复时旧 Token 计数泄漏的问题。
+- 修复 `test_tui_layout.py` WelcomeBanner 文案断言与当前 UI 不一致的测试回归。
+
 ## [0.1.3.12] - 2026-09-08
 
 ### Added

@@ -34,22 +34,32 @@ class SessionManager:
         session_id: str,
         agent_data: dict[str, Any],
         title: str = "",
+        usage: dict[str, Any] | None = None,
     ) -> Path:
         """Persist agent state to a JSON session file."""
         path = self.session_dir / f"{session_id}.json"
         existing_title = ""
-        if not title and path.exists():
+        existing_usage = None
+        if path.exists():
             try:
                 old = json.loads(path.read_text(encoding="utf-8"))
-                existing_title = old.get("title", "")
+                if not title:
+                    existing_title = old.get("title", "")
+                existing_usage = old.get("usage")
             except Exception:
                 pass
         final_title = title.strip() or existing_title or _extract_title(agent_data)
+        usage_data = usage
+        if usage_data is None and isinstance(agent_data, dict):
+            usage_data = agent_data.get("extra", {}).get("usage")
+        if usage_data is None:
+            usage_data = existing_usage
         payload = {
             "id": session_id,
             "title": final_title,
             "saved_at": time.time(),
             "agent": agent_data,
+            "usage": usage_data,
         }
         try:
             path.write_text(
@@ -113,10 +123,15 @@ class SessionManager:
         for f in self.session_dir.glob("*.json"):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
+                agent_data = data.get("agent", {})
+                messages = agent_data.get("messages", [])
+                preview = _extract_preview(agent_data)
                 sessions.append({
                     "id": data.get("id", f.stem),
                     "title": data.get("title", ""),
                     "saved_at": data.get("saved_at", 0),
+                    "message_count": len(messages),
+                    "preview": preview,
                 })
             except (json.JSONDecodeError, KeyError):
                 continue
@@ -278,6 +293,82 @@ class SessionManager:
         log_path = self.log_dir / f"{session_id}.log"
         log_path.unlink(missing_ok=True)
 
+    def get_session_preview(self, session_id: str, max_messages: int = 15) -> str:
+        """Return formatted conversation transcript/preview for a session."""
+        try:
+            data = self.load(session_id)
+        except Exception:
+            return "[dim](Session data not found)[/dim]"
+
+        title = data.get("title") or "Untitled Session"
+        agent_data = data.get("agent", {})
+        messages = agent_data.get("messages", [])
+        saved_at = float(data.get("saved_at", 0) or 0)
+        time_str = (
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(saved_at))
+            if saved_at
+            else "unknown"
+        )
+
+        lines = [
+            f"[bold cyan]{title}[/bold cyan]",
+            f"[dim]ID: {session_id}  ·  Saved: {time_str}  ·  {len(messages)} messages[/dim]",
+            "[dim]" + "─" * 40 + "[/dim]",
+            "",
+        ]
+
+        if not messages:
+            lines.append("[dim](No messages in this session)[/dim]")
+            return "\n".join(lines)
+
+        shown_messages = messages[:max_messages]
+        for m in shown_messages:
+            role = (m.get("role") or "").lower()
+            content = (m.get("content") or "").strip()
+            if role == "user":
+                snippet = _clean_msg_text(content, 200)
+                lines.append(f"[bold dodger_blue1]👤 User:[/bold dodger_blue1]\n{snippet}\n")
+            elif role == "assistant":
+                if content:
+                    snippet = _clean_msg_text(content, 200)
+                    lines.append(f"[bold green]🤖 Assistant:[/bold green]\n{snippet}\n")
+                tool_calls = m.get("tool_calls", [])
+                for tc in tool_calls:
+                    tc_name = tc.get("name", "tool")
+                    args = tc.get("arguments", {})
+                    args_str = " ".join(f"{k}={repr(v)}" for k, v in args.items())
+                    if len(args_str) > 60:
+                        args_str = args_str[:57] + "…"
+                    lines.append(f"[dim yellow]⚙ {tc_name} {args_str}[/dim yellow]\n")
+            elif role == "tool":
+                tr = m.get("tool_result", {})
+                tr_content = (tr.get("content") or "").strip()
+                if tr_content:
+                    snippet = _clean_msg_text(tr_content, 100)
+                    lines.append(f"[dim]  ↳ output: {snippet}[/dim]\n")
+
+        if len(messages) > max_messages:
+            lines.append(f"[dim]… and {len(messages) - max_messages} more messages[/dim]")
+
+        return "\n".join(lines)
+
+
+def _clean_msg_text(text: str, limit: int = 240) -> str:
+    """Strip XML/directory tags and clean up message snippet for preview."""
+    text = re.sub(r"<file\b[^>]*>.*?</file>", " ", text, flags=re.S)
+    text = re.sub(r"<directory\b[^>]*>.*?</directory>", " ", text, flags=re.S)
+    text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
+    cleaned = " ".join(text.split()).strip()
+    return cleaned[:limit] + "…" if len(cleaned) > limit else cleaned
+
+
+def _extract_preview(agent_data: dict[str, Any]) -> str:
+    """Derive a short preview from conversation messages."""
+    for msg in agent_data.get("messages", []):
+        if msg.get("role") == "user" and msg.get("content"):
+            return _clean_msg_text(msg["content"], 80)
+    return ""
+
 
 def _extract_title(agent_data: dict[str, Any]) -> str:
     """Try to derive a short, readable title from the first user message."""
@@ -285,15 +376,6 @@ def _extract_title(agent_data: dict[str, Any]) -> str:
         if msg.get("role") != "user" or not msg.get("content"):
             continue
         text = msg["content"]
-        # Remove injected file/directory context so titles stay readable.
-        text = re.sub(r"<file\b[^>]*>.*?</file>", " ", text, flags=re.S)
-        text = re.sub(r"<directory\b[^>]*>.*?</directory>", " ", text, flags=re.S)
-        text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
-        # Collapse whitespace/newlines into a single line.
-        cleaned = " ".join(text.split()).strip()
-        if not cleaned:
-            cleaned = " ".join(text.split()).strip() or "(untitled)"
-        if len(cleaned) > 60:
-            cleaned = cleaned[:60].rstrip() + "…"
-        return cleaned
+        cleaned = _clean_msg_text(text, 60)
+        return cleaned or "(untitled)"
     return ""

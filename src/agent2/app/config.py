@@ -8,6 +8,7 @@ Example ``~/.config/agent2/config.json``::
 
     {
         "default": "gpt-4o-mini",
+        "max_iterations": 50,
         "providers": {
             "openai": {
                 "api_key": "sk-..."
@@ -103,6 +104,10 @@ class AppConfig(BaseModel):
         default=4096,
         description="Default maximum tokens for responses",
     )
+    max_iterations: int = Field(
+        default=50,
+        description="Default maximum iterations / turns for the agent reasoning loop",
+    )
     providers: dict[str, ProviderConfig] = Field(
         default_factory=dict,
         description="Named provider endpoints and credentials (e.g. openai, deepseek, ollama)",
@@ -111,6 +116,14 @@ class AppConfig(BaseModel):
         default_factory=dict,
         description="Named model definitions or aliases mapped to provider/model parameters",
     )
+    rules: list[str] = Field(
+        default_factory=list,
+        description="Inline rules injected into the agent's system prompt",
+    )
+    mcp_servers: dict[str, Any] = Field(
+        default_factory=dict,
+        description="MCP server configurations keyed by server name",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -118,6 +131,10 @@ class AppConfig(BaseModel):
         """Migrate legacy ``llm`` section into ``default``, ``providers``, etc."""
         if not isinstance(data, dict):
             return data
+        if "max_turns" in data and "max_iterations" not in data:
+            data["max_iterations"] = data["max_turns"]
+        if "max_rounds" in data and "max_iterations" not in data:
+            data["max_iterations"] = data["max_rounds"]
         if "llm" in data and isinstance(data["llm"], dict):
             llm_obj = data["llm"]
             if "default" not in data and "model" in llm_obj:
@@ -150,6 +167,11 @@ class AppConfig(BaseModel):
             api_key=api_key,
             base_url=base_url,
         )
+
+    @property
+    def max_turns(self) -> int:
+        """Alias for :attr:`max_iterations`."""
+        return self.max_iterations
 
     def resolve_model(self, name_or_alias: str) -> dict[str, Any] | None:
         """Resolve a model name or alias with provider inheritance."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from textual import events
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.message import Message
 from textual.widgets import Button, Collapsible, Markdown, Static
@@ -60,6 +61,21 @@ class MessageList(ScrollableContainer):
     def on_mount(self) -> None:
         self.anchor(True)
 
+    def on_key(self, event: events.Key) -> None:
+        if (
+            event.character
+            and event.character.isprintable()
+            and event.key not in ("tab", "enter", "escape", "up", "down", "pageup", "pagedown", "home", "end")
+        ):
+            try:
+                chat_input = self.screen.query_one("#chat-input")
+                chat_input.focus()
+                chat_input.insert(event.character)
+                event.prevent_default()
+                event.stop()
+            except Exception:
+                pass
+
     def _maybe_scroll_to_bottom(self) -> None:
         """Scroll to the bottom if the user hasn't actively scrolled away."""
         if not self._anchor_released or self.is_vertical_scroll_end:
@@ -101,8 +117,14 @@ class MessageList(ScrollableContainer):
         self._maybe_scroll_to_bottom()
         return block
 
-    def add_tool_card(self, tool_name: str, arguments: dict) -> ToolCard:  # type: ignore[type-arg]
-        card = ToolCard(tool_name, arguments)
+    def add_tool_card(
+        self,
+        tool_name: str,
+        arguments: dict,  # type: ignore[type-arg]
+        result: str | None = None,
+        is_error: bool = False,
+    ) -> ToolCard:
+        card = ToolCard(tool_name, arguments, result=result, is_error=is_error)
         self.mount(card)
         self._maybe_scroll_to_bottom()
         return card

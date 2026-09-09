@@ -13,6 +13,10 @@
 | 🪞 **自我反思** | ReflectionMixin 添加输出自评和迭代改进 |
 | 💾 **记忆系统** | 短期 (WorkingMemory) + 长期 (LongTermMemory/TF-IDF) |
 | 👥 **多 Agent 编排** | 顺序/监督者/辩论 三种协作模式 |
+| 📚 **Context / Skills** | 自动加载 Rules 与 SKILL.md，支持 /skills 浏览与动态调用 |
+| 🔌 **MCP 工具集成** | 通过 MCP server 动态扩展外部工具 |
+| 🛡️ **多级审批** | Approve once / conversation / project / always 四级作用域 |
+| 🚀 **YOLO / Allow-all** | 自动批准所有工具执行，YOLO 模式由 LLM 自主决策 |
 
 ## 快速开始
 
@@ -71,6 +75,8 @@ uv run -m agent2.app.tui --mode ask   # 以 Ask 只读模式启动
   - DAG 拓扑执行与上下文隔离：依据依赖关系拓扑排序，为各个子任务派发单独的子 agent 独立执行，严格仅传递所需的前序结果与上下文。
   - 结果汇总：待子任务全部完成后统一聚合结果，生成完整最终回答。
 - **Ask 模式**（`/ask`）：只读问答模式，**严格禁止所有写和执行操作**（禁用 `file_write`、`shell_exec`、`python_exec` 等），仅开放只读与目录查看工具。
+- **Skills**（`/skills`）：浏览、搜索、重载并调用 `SKILL.md` 技能；也可直接使用 `/<skill_name> [prompt]`。
+- **YOLO / Allow-all**（`/yolo`、`/allow-all`）：自动批准所有工具执行；YOLO 模式额外让 LLM 自主决策，无需向用户提问。
 
 ## 配置文件 (`~/.config/agent2/config.json`)
 
@@ -79,6 +85,17 @@ Agent2 支持通过用户级配置文件管理服务商凭据与模型别名。�
 ```json
 {
   "default": "gpt-4o-mini",
+  "max_iterations": 50,
+  "rules": [
+    "Always prefer concise, production-ready code.",
+    "Run tests before reporting success."
+  ],
+  "mcp_servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    }
+  },
   "providers": {
     "openai": {
       "api_key": "sk-..."
@@ -106,6 +123,9 @@ Agent2 支持通过用户级配置文件管理服务商凭据与模型别名。�
 ```
 
 - **`default`**：默认模型别名或名称（如 `"gpt-4o-mini"`、`"deepseek"`）。
+- **`max_iterations`**：Agent 最大推理轮数（默认 `50`，支持别名 `max_turns`）。
+- **`rules`**：inline 规则列表，自动注入 Agent system prompt。
+- **`mcp_servers`**：MCP server 配置（stdio `command`/`args`/`env` 或 SSE `url`），启动时自动发现并注册 MCP 工具。
 - **`providers`**：服务商端点与 API Key 集中管理，同服务商下的多模型无需重复配置凭据与 base URL。
 - **`models`**：具名模型别名映射，只需指定所属 `provider` 即可自动继承连接配置。
 
@@ -120,6 +140,9 @@ agent2/
 ├── agent/      # Agent 核心 — ReAct / Planner / Reflection
 ├── memory/     # 记忆系统 — Working / LongTerm
 ├── crew/       # 多 Agent — Sequential / Supervisor / Debate
+├── context.py  # Rules / Skills 发现与加载
+├── mcp.py      # MCP 工具桥接
+├── app/        # CLI / TUI 应用层
 └── utils/      # 配置 + 日志 + JSON 提取工具
 ```
 

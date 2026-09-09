@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.3.12 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.13 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -121,7 +121,7 @@
   - **单轮模式** (`-p`) — 发送消息、执行、退出。
   - **交互模式** — 多轮对话，支持 `-i` 预填首条消息。
   - **模型选择** — `-s` 启动时弹出交互菜单；`--model` 直接指定；支持 Provider 自动推导与紧凑排版。
-  - **斜杠命令** — `/model`（切换模型）、`/tools`（查看工具）、`/clear`（清空历史）、`/help`。
+  - **斜杠命令** — `/model`（切换模型）、`/tools`（查看工具）、`/skills`（浏览/调用技能）、`/yolo`、`/allow-all`、`/clear`（清空历史）、`/help`。
   - **纯聊天模式** — `--no-tools` 禁用内置工具。
   - 自动隐藏无 API Key 的远程模型，保留本地/局域网模型。
 
@@ -129,6 +129,8 @@
 
 - **无冗余数据组织**：`providers`（集中配置 endpoint / api_key）与 `models`（模型别名引用所属 provider）分离，配合顶层 `default` 默认模型指定。
 - **自动继承与兼容**：支持子模型自动继承服务商凭据，兼容 legacy `llm` 配置。
+- **全局配置项**：支持设置 `max_iterations` 最大轮数（默认 `50`，别名 `max_turns`）。
+- **Context 与 MCP 配置**：支持 `rules` inline 规则列表与 `mcp_servers` MCP 服务器配置。
 - `last_model` 文件记忆上次选择的模型。
 
 
@@ -148,27 +150,31 @@
       - 只读问答与代码分析模式，**严格禁用所有写和执行操作**（禁用 `file_write`、`shell_exec`、`python_exec` 等）。
       - 并在 Tool Schema 注入与 Agent 执行拦截层面做双重安全防护。
   - **Copilot CLI 风格现代极简布局**：
-    - **顶部导航栏 (`TopTabBar`)** — 水平排列 `Current`、`Sessions`、`Help` 紧凑标签，支持鼠标直达、快捷键（`F1`/`F2`/`F3`）以及输入框为空时按 `Tab` 键循环切换。
+    - **顶部导航栏 (`TopTabBar`)** — 水平排列 `Current`、`Sessions`、`Skills`、`Help` 紧凑标签，支持鼠标直达、快捷键（`F1`–`F4`）以及输入框为空时按 `Tab` 键循环切换。
     - **极简欢迎横幅 (`WelcomeBanner`)** — 空会话呈现居中 ASCII Mascot 图标、免责声明与动态轮播的 Tip 指引卡片，并在 `/clear` 后优雅恢复。
     - **独立帮助模态浮层 (`HelpScreen`)** — 集中展示运行模式、按键绑定、斜杠命令与上下文注入语法，支持 `?` / `/help` 快捷打开。
     - **双层状态栏 (`ContextBar` + `StatusBar`)** — 紧贴输入框上方的 `ContextBar` 呈现工作目录、执行 Spinner、Token 用量与模型提供商；底端单行 `StatusBar` 呈现导航指引与模式徽标（`[AGENT]` / `[PLAN]` / `[ASK]`）。
   - **模型提供商与 Host 智能识别** — 自动解析底层 LLM 提供商标签（如 `[deepseek] deepseek-chat`）；对于私有代理、内网网关或局域网 IP，智能选用 `base_url` 的 host（如 `[localhost:11434] llama3.1`）并完成 Rich Markup 括号转义。
   - **现代全屏交互视窗**：
-    - **会话管理视窗 (`SessionSelectScreen` / `/sessions`)** — 全屏极简设计，支持实时关键词过滤搜索、全宽亮蓝高光选框、`↑`/`↓` 键盘导航、`e` 重命名、`d` 删除会话、`Enter` 恢复会话。
+    - **会话管理视窗 (`SessionSelectScreen` / `/sessions`)** — 全屏极简设计，支持实时关键词过滤搜索、全宽亮蓝高光选框、`↑`/`↓` 键盘导航、`e` 重命名、`d` 删除会话、`Enter` 恢复会话；右侧预览面板展示会话转录并支持按预览内容过滤。
+    - **Skills 管理视窗 (`SkillSelectScreen` / `/skills`)** — 全屏选择器，支持技能实时过滤、`↑`/`↓` 导航、`r` 重载、`Enter` 调用；顶栏 `Skills` 标签对应 `F3`。
     - **模型选择视窗 (`ModelSelectScreen` / `/model`)** — 全屏极简设计，提供顶栏联动、模型分组、全宽亮蓝高光条、即打即搜与自定义模型 identifier 直达。
   - **斜杠命令菜单快速确认** — 输入 `/` 弹出命令自动补全菜单时，按 `Enter` 键直接等同于 `Tab` 键完成补全填充。
   - **全扁平极简无边框 UI 风格 (Flat Borderless Design)** — 彻底移除所有界面边框线（`border: none`）与不必要的内衬距/外边距，全屏采用现代无边框贴合、极简色块底色与零间距边缘平铺。
   - **会话快捷重命名 (`/rename`)** — `/rename <new-title>` 快速修改当前会话名称并持久化保存。
   - **用户消息即时挂载渲染** — 消息提交后立即在 DOM 中挂载并刷新贴底渲染，免除等待模型网络请求响应的停顿感。
-  - **流式嵌入确认卡片 (`ConfirmCard` / HITL 审批)** — 工具审批从独立弹层改为自然嵌入消息流的紧凑卡片：
+  - **流式嵌入确认卡片 (`ConfirmCard` / HITL 审批)** — 工具审批从独立弹层改为自然嵌入消息流的紧凑卡片，支持多级审批作用域：
     - 工具名称与参数单行紧凑排版，配合清晰颜色区分。
-    - 初始挂载自动聚焦 `[y] Approve` 按钮。
-    - 支持 `Left` / `Right`（或 `h` / `l`）方向键循环切换焦点，支持 `y` / `n` / `a` / `Esc` 快捷键。
-    - 按钮底色透明无缝融入背景，颜色直接呈现在操作文字上。
-    - 审批完成后自动转换为历史状态徽标（`✓ Approved` / `✗ Rejected` / `✓ Always Allowed`），并将输入焦点归还输入框。
+    - 审批选项：`[1/y] Approve once`、`[c] In conversation`、`[p] In project`、`[a] Always approve`、`[n] Reject`。
+    - 支持 `Left` / `Right`（或 `h` / `l`）方向键循环切换焦点，支持 `1/y`、`2/c`、`3/p`、`4/a`、`n` / `Esc` 快捷键。
+    - conversation / project / global 三级授权持久化到 `.agent2/approvals.json` 或 `~/.config/agent2/approvals.json`。
+    - 审批完成后自动转换为历史状态徽标（`✓ Approved once` / `✓ Approved in project` / `✓ Always approved` / `✗ Rejected`），并将输入焦点归还输入框。
   - **工具执行结果面板折叠与快捷切换 (`ToolCard` / `Ctrl+O`)**：
-    - 工具执行结果面板（Result Panel）默认折叠展示（`collapsed=True`），边距紧凑无冗余空白。
+    - 工具卡片标题自动显示操作摘要（shell command 首行 / python 首行 / 文件路径 / web query 等），运行中显示 `⏳` 且禁止折叠。
+    - 工具执行结果面板（Result Panel）默认折叠展示（`collapsed=True`），成功结果保持紧凑，错误结果额外显示 `❌ Error` 状态行。
     - 全局快捷键 `Ctrl+O` 一键批量展开 / 收起所有工具执行结果面板。
+  - **Token 用量持久化与实时同步** — 会话保存 `usage`；恢复会话、切换模型、Plan 子任务聚合均保留 Token 计数；Thought / Tool 完成事件实时刷新 `ContextBar`，取消或异常时也会同步。
+  - **YOLO / Allow-all 模式** — `/yolo` 自动批准所有操作并注入自主决策系统提示；`/allow-all` 仅自动批准；状态栏显示 `YOLO` / `ALLOW-ALL` 徽标。
   - **对话回退与分叉 (`/rewind` / `/fork`)** — `/rewind` 回退最近一轮对话并将用户输入填回输入框；`/fork [title]` 克隆当前完整会话为新 session 继续对话。
   - **消息级 Point Rewind / Fork / Retry 交互** — 点击或焦点选中任意历史消息，显示 `⏪ Rewind`、`🔄 Retry` 和 `🍴 Fork` 操作按钮。在 UserMessage 上回退/重试/分叉到该消息之前；在 AssistantMessage 上回退/重试/分叉到该回复处。Escape 取消选择。
   - **指令重试与继续 (`/retry` / `/continue`)** — `/retry` 重发最后一轮用户提问；`/continue` 一键唤醒 Agent 继续完成未完任务。
@@ -181,7 +187,39 @@
 
 
 
-## 8. 示例 (`examples/`)
+## 8. Context、Skills 与 MCP 集成
+
+### 8.1 Context 与 Rules (`agent2.context`)
+
+- 自动发现并加载全局/项目 Rules 文件（`.md` / `.txt`），以及 `config.json` 中的 inline rules。
+- `Context.build_system_prompt()` 将规则以 `<rules>` 标签注入 Agent 的 system prompt。
+- 搜索路径：`~/.config/agent2/rules`、`~/.agent2/rules`、`<cwd>/.agent2/rules`。
+
+### 8.2 Skills (`agent2.context` + `agent2.app.tui.screens.skill_select`)
+
+- 遵循 Agent Skills 规范，从 `SKILL.md` YAML frontmatter 解析 `name` / `description`，支持折叠多行描述与无 frontmatter 回退。
+- 多目录优先级：全局 `~/.config/agent2/skills`、`~/.claude/skills`、`~/.agent2/skills`；项目 `.claude/skills`、`.agents/skills`、`.agent2/skills`，同名技能后扫描目录覆盖。
+- 支持 `/skills` 浏览/重载、动态 `/<skill_name> [prompt]` 调用、斜杠命令补全；TUI 提供 `SkillSelectScreen` 全屏选择器（`F3`）。
+
+### 8.3 MCP (Model Context Protocol) (`agent2.mcp`)
+
+- `MCPManager` 通过 stdio 连接外部 MCP server，动态发现 tools 并包装为 agent2 `Tool`。
+- `config.json` 的 `mcp_servers` 可配置多个 server（`command` / `args` / `env` / `url`）。
+- 可选依赖：`uv pip install agent2[mcp]`（`mcp>=1.0`）。
+
+### 8.4 多级工具审批作用域 (`agent2.app.approval`)
+
+- conversation / project / global 三级审批持久化。
+- ConfirmCard 提供 `Approve once`、`In conversation`、`In project`、`Always approve`、`Reject` 五档选择。
+- 项目级授权写入 `<project>/.agent2/approvals.json`，全局授权写入 `~/.config/agent2/approvals.json`。
+
+### 8.5 YOLO / Allow-all 模式
+
+- `/yolo on|off|show`：自动批准所有操作，并向 system prompt 注入自主决策指令。
+- `/allow-all on|off|show`：仅自动批准所有操作，不改变 system prompt。
+- 状态栏显示 `YOLO` / `ALLOW-ALL` 徽标；TUI 与 Chat CLI 均支持。
+
+## 9. 示例 (`examples/`)
 
 | 示例 | 说明 |
 |------|------|
@@ -191,9 +229,9 @@
 | `04_memory.py` | 记忆系统演示（无需 API Key） |
 | `05_multi_agent.py` | 多 Agent 协作 |
 
-## 9. 技术栈
+## 10. 技术栈
 
 - **Python ≥ 3.13**，uv 管理项目和依赖
 - 核心依赖：`pydantic` / `pydantic-settings` / `httpx` / `rich` / `openai`
-- 可选依赖：`numpy`（memory）、`textual`（TUI）、`pytest` / `pytest-asyncio` / `mypy`（dev）
+- 可选依赖：`numpy`（memory）、`mcp`（MCP 工具集成）、`textual`（TUI）、`pytest` / `pytest-asyncio` / `mypy`（dev）
 - 构建系统：Hatchling

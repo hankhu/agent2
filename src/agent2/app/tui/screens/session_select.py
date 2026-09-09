@@ -7,7 +7,7 @@ from typing import Any
 
 from textual import events
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
@@ -113,8 +113,16 @@ class SessionSelectScreen(ModalScreen[str]):
         text-style: bold;
     }
 
-    #session-list {
+    #session-body {
         height: 1fr;
+        layout: horizontal;
+        margin: 0;
+        padding: 0;
+    }
+
+    #session-list {
+        width: 1fr;
+        height: 100%;
         background: transparent;
         border: none;
         padding: 0;
@@ -130,6 +138,25 @@ class SessionSelectScreen(ModalScreen[str]):
 
     #session-list > .option-list--option:hover {
         background: #161b22;
+    }
+
+    #session-preview-col {
+        width: 1fr;
+        height: 100%;
+        background: #161b22;
+        border-left: solid #30363d;
+        padding: 0 1;
+        margin: 0;
+    }
+
+    #session-preview-scroll {
+        height: 1fr;
+        scrollbar-size-vertical: 1;
+    }
+
+    #session-preview-content {
+        padding: 0 1;
+        color: #c9d1d9;
     }
 
     #session-search {
@@ -175,6 +202,7 @@ class SessionSelectScreen(ModalScreen[str]):
         self._session_manager = session_manager or SessionManager()
         self._filtered_sessions: list[dict[str, Any]] = list(sessions)
         self._renaming_session: dict[str, Any] | None = None
+        self._preview_cache: dict[str, str] = {}
 
     def compose(self):  # type: ignore[override]
         yield TopTabBar(id="top-nav")
@@ -187,7 +215,11 @@ class SessionSelectScreen(ModalScreen[str]):
                 id="session-tip",
             )
             yield Static("Saved sessions", id="session-group-header")
-            yield OptionList(id="session-list")
+            with Horizontal(id="session-body"):
+                yield OptionList(id="session-list")
+                with Vertical(id="session-preview-col"):
+                    with VerticalScroll(id="session-preview-scroll"):
+                        yield Static(id="session-preview-content")
             yield SessionSearchInput(placeholder="❯ Search sessions...", id="session-search")
             yield Static(
                 "[dim]↑/↓ to navigate  ·  enter to select  ·  e rename  ·  d delete  ·  esc to cancel[/dim]",
@@ -200,12 +232,32 @@ class SessionSelectScreen(ModalScreen[str]):
         self._populate_options()
         self.query_one("#session-search", SessionSearchInput).focus()
 
+    def _show_preview(self, session_id: str | None = None) -> None:
+        try:
+            preview_widget = self.query_one("#session-preview-content", Static)
+        except Exception:
+            return
+        if not session_id:
+            preview_widget.update("[dim](No session selected)[/dim]")
+            return
+        if session_id not in self._preview_cache:
+            self._preview_cache[session_id] = self._session_manager.get_session_preview(session_id)
+        preview_widget.update(self._preview_cache[session_id])
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        if event.option and event.option.id:
+            self._show_preview(str(event.option.id))
+        elif event.option_index is not None and 0 <= event.option_index < len(self._filtered_sessions):
+            self._show_preview(str(self._filtered_sessions[event.option_index].get("id", "")))
+
     def _populate_options(self, query: str = "") -> None:
         q = query.strip().lower()
         if q:
             self._filtered_sessions = [
                 s for s in self._sessions
-                if q in (s.get("title") or "").lower() or q in str(s.get("id", "")).lower()
+                if q in (s.get("title") or "").lower()
+                or q in str(s.get("id", "")).lower()
+                or q in str(s.get("preview", "")).lower()
             ]
         else:
             self._filtered_sessions = list(self._sessions)
@@ -215,6 +267,7 @@ class SessionSelectScreen(ModalScreen[str]):
 
         if not self._filtered_sessions:
             opt_list.add_option(Option("[dim]No matching sessions found[/dim]", disabled=True))
+            self._show_preview(None)
             return
 
         for s in self._filtered_sessions:
@@ -223,14 +276,20 @@ class SessionSelectScreen(ModalScreen[str]):
             saved_at = float(s.get("saved_at", 0) or 0)
             time_str = _fmt_time_ago(saved_at)
             
-            line = f"  {title:<40}  [dim]·  {sid}  ·  {time_str}[/dim]"
+            line = f"  {title:<35}  [dim]·  {sid}  ·  {time_str}[/dim]"
             opt_list.add_option(Option(line, id=str(s.get("id", ""))))
 
         opt_list.highlighted = 0
+        first_id = str(self._filtered_sessions[0].get("id", ""))
+        self._show_preview(first_id)
 
     def on_top_tab_bar_tab_selected(self, event: TopTabBar.TabSelected) -> None:
         if event.tab_id == "current":
             self.dismiss("")
+        elif event.tab_id == "skills":
+            from agent2.app.tui.screens.skill_select import SkillSelectScreen
+            self.dismiss("")
+            self.app.push_screen(SkillSelectScreen())
         elif event.tab_id == "help":
             self.app.push_screen(HelpScreen())
 
@@ -247,6 +306,7 @@ class SessionSelectScreen(ModalScreen[str]):
                 try:
                     self._session_manager.rename(sess_id, new_title)
                     self._renaming_session["title"] = new_title
+                    self._preview_cache.pop(sess_id, None)
                     app = self.app
                     if getattr(app, "session_id", None) == sess_id:
                         app.session_title = new_title  # type: ignore[attr-defined]
@@ -317,6 +377,7 @@ class SessionSelectScreen(ModalScreen[str]):
                 self._session_manager.delete(sess_id)
             except Exception:
                 pass
+            self._preview_cache.pop(sess_id, None)
             if target in self._sessions:
                 self._sessions.remove(target)
 

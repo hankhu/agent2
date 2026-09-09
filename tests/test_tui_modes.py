@@ -347,7 +347,7 @@ def test_build_tui_agent_modes() -> None:
 
     agent_ask = build_tui_agent(mode="ask")
     assert agent_ask.mode == "ask"
-    assert agent_ask.system_prompt == ASK_SYSTEM_MSG
+    assert agent_ask.system_prompt.startswith(ASK_SYSTEM_MSG)
     ask_tool_names = [t.name for t in agent_ask.tool_registry.list_tools()]
     assert "file_write" not in ask_tool_names
     assert "shell_exec" not in ask_tool_names
@@ -469,23 +469,34 @@ async def test_confirm_card_inline_focus_and_navigation() -> None:
         # 1. Verify card is embedded in messages list (flow layout)
         assert card in list(messages.children)
 
-        # 2. Verify initial focus is on the approve button
-        approve_btn = card.query_one("#approve", Button)
-        reject_btn = card.query_one("#reject", Button)
+        # 2. Verify initial focus is on the approve_once button
+        approve_btn = card.query_one("#approve_once", Button)
+        conv_btn = card.query_one("#approve_conversation", Button)
+        proj_btn = card.query_one("#approve_project", Button)
         always_btn = card.query_one("#always", Button)
+        reject_btn = card.query_one("#reject", Button)
         assert approve_btn.has_focus
 
-        # 3. Test right arrow switches focus to reject -> always -> wraps to approve
+        # 3. Test right arrow switches focus: approve_once -> conv -> proj -> always -> reject -> wraps
         await pilot.press("right")
-        assert reject_btn.has_focus
+        assert conv_btn.has_focus
+
+        await pilot.press("right")
+        assert proj_btn.has_focus
 
         await pilot.press("right")
         assert always_btn.has_focus
 
         await pilot.press("right")
+        assert reject_btn.has_focus
+
+        await pilot.press("right")
         assert approve_btn.has_focus
 
         # 4. Test left arrow switches focus in reverse
+        await pilot.press("left")
+        assert reject_btn.has_focus
+
         await pilot.press("left")
         assert always_btn.has_focus
 
@@ -511,7 +522,7 @@ async def test_confirm_card_shortcuts_and_focus_return() -> None:
         await pilot.pause()
         await pilot.press("y")
         await pilot.pause()
-        assert decisions[-1] == "approve"
+        assert decisions[-1] == "approve_once"
         assert chat_input.has_focus
 
         card2 = messages.add_confirm_card("file_write", {"path": "b.txt"}, on_decision=lambda r: decisions.append(r))

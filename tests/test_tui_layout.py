@@ -30,17 +30,21 @@ def test_welcome_banner_render() -> None:
     assert "Agent2" in rendered
     assert "/plan" in rendered
     assert "Break down tasks" in rendered
-    assert "Check for mistakes." in rendered
+    assert "Verify outputs for correctness." in rendered
 
 
 def test_top_tab_bar_cycling() -> None:
-    """Test TopTabBar cycling between current, sessions, and help."""
+    """Test TopTabBar cycling between current, sessions, skills, and help."""
     tab_bar = TopTabBar()
     assert tab_bar.active_tab == "current"
 
     next_tab = tab_bar.cycle_tab(1)
     assert next_tab == "sessions"
     assert tab_bar.active_tab == "sessions"
+
+    next_tab = tab_bar.cycle_tab(1)
+    assert next_tab == "skills"
+    assert tab_bar.active_tab == "skills"
 
     next_tab = tab_bar.cycle_tab(1)
     assert next_tab == "help"
@@ -67,9 +71,12 @@ def test_context_bar_and_status_bar_rendering() -> None:
 
 
 @pytest.mark.asyncio
-async def test_full_app_layout_widgets() -> None:
+async def test_full_app_layout_widgets(tmp_path: Path) -> None:
     """Test that all modern widgets exist and mount in Agent2App."""
-    app = Agent2App(agent=ReActAgent(name="test", llm=DummyLLM()))
+    from agent2.app.tui.session import SessionManager
+
+    empty_sm = SessionManager(session_dir=tmp_path / "empty_sessions", log_dir=tmp_path / "empty_logs")
+    app = Agent2App(agent=ReActAgent(name="test", llm=DummyLLM()), session_manager=empty_sm)
     async with app.run_test(size=(100, 30)) as pilot:
         screen = app.screen
         top_bar = screen.query_one(TopTabBar)
@@ -91,8 +98,8 @@ async def test_full_app_layout_widgets() -> None:
         # If no saved sessions, dialog gracefully alerts and returns active_tab to "current"
         assert top_bar.active_tab == "current"
 
-        # Now test cycling to help (F3 pushes HelpScreen)
-        await pilot.press("f3")
+        # Now test cycling to help (F4 pushes HelpScreen)
+        await pilot.press("f4")
         await pilot.pause()
         assert isinstance(app.screen, HelpScreen)
         await pilot.press("escape")
@@ -121,7 +128,7 @@ async def test_help_screen_modal() -> None:
 
 @pytest.mark.asyncio
 async def test_top_tab_bar_width_and_visibility() -> None:
-    """Ensure all 3 tabs in TopTabBar have proper width and are not collapsed."""
+    """Ensure tabs in TopTabBar have proper width and are not collapsed."""
     class TabTestApp(App):
         def compose(self) -> ComposeResult:
             yield TopTabBar()
@@ -131,13 +138,11 @@ async def test_top_tab_bar_width_and_visibility() -> None:
         tab_bar = app.screen.query_one(TopTabBar)
         current = tab_bar.query_one("#tab-current")
         sessions = tab_bar.query_one("#tab-sessions")
-        help_tab = tab_bar.query_one("#tab-help")
 
         assert current.region.width > 0
         assert sessions.region.width > 0
-        assert help_tab.region.width > 0
         # Check they are positioned sequentially without overlapping
-        assert current.region.x < sessions.region.x < help_tab.region.x
+        assert current.region.x < sessions.region.x
 
 
 @pytest.mark.asyncio

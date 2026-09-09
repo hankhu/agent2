@@ -370,3 +370,119 @@ def test_main_cli_export(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
     assert f"Conversation exported to: {out_file}" in captured
     assert out_file.exists()
     assert "Hello CLI export" in out_file.read_text(encoding="utf-8")
+
+
+def test_from_dict_builtin_tool_deduplication() -> None:
+    data = {
+        "agent_type": "ReActAgent",
+        "name": "test_agent",
+        "tools": ["file_read", "file_write", "shell_exec"],
+        "messages": [],
+    }
+    restored = BaseAgent.from_dict(data)
+    tool_names = [t.name for t in restored.tool_registry.list_tools()]
+    assert tool_names == ["file_read", "file_write", "shell_exec"]
+
+
+@pytest.mark.asyncio
+async def test_tui_restore_messages_with_tool_cards(tmp_path: Path) -> None:
+    from agent2.app.tui.app import Agent2App, TUIReActAgent
+    from agent2.app.tui.widgets.message_list import AssistantMessage, MessageList, UserMessage
+    from agent2.app.tui.widgets.tool_card import ToolCard
+
+    sm = SessionManager(session_dir=tmp_path / "sessions", log_dir=tmp_path / "logs")
+    agent_data = {
+        "name": "assistant",
+        "agent_type": "TUIReActAgent",
+        "system_prompt": "sys",
+        "messages": [
+            {"role": "user", "content": "Read test file"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "call_1", "name": "file_read", "arguments": {"path": "test.txt"}}],
+            },
+            {
+                "role": "tool",
+                "tool_result": {"tool_call_id": "call_1", "content": "File content 123", "is_error": False},
+            },
+            {"role": "assistant", "content": "The file contains 123."},
+        ],
+    }
+    sm.save("sess_tools", agent_data, title="Tools Session")
+
+    agent = TUIReActAgent(name="assistant", llm=DummyLLM())
+    app = Agent2App(agent=agent, session_manager=sm, resume_session_id="sess_tools")
+    async with app.run_test(size=(80, 24)) as pilot:
+        messages = pilot.app.screen.query_one("#messages", MessageList)
+        u_msgs = list(messages.query(UserMessage))
+        a_msgs = list(messages.query(AssistantMessage))
+        cards = list(messages.query(ToolCard))
+
+        assert len(u_msgs) == 1
+        assert u_msgs[0]._text == "Read test file"
+
+        assert len(cards) == 1
+        assert cards[0]._tool_name == "file_read"
+        assert cards[0]._initial_result == "File content 123"
+
+        assert len(a_msgs) == 1
+        assert a_msgs[0]._content == "The file contains 123."
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_session_save_and_restore(tmp_path: Path) -> None:
+    import json
+    from agent2.app.tui.app import Agent2App, TUIReActAgent
+    from agent2.app.tui.widgets.input_area import ChatInput
+    from agent2.app.tui.widgets.message_list import AssistantMessage, MessageList, UserMessage
+
+    plan_json = json.dumps({
+        "summary": "Step by step plan",
+        "tasks": [{"id": "1", "description": "Write code", "dependencies": [], "context_needed": ""}],
+    })
+
+    class PlanLLM(BaseLLM):
+        def __init__(self) -> None:
+            super().__init__(model="plan-model")
+
+        async def chat(self, messages: list[Message], tools=None) -> LLMResponse:
+            return LLMResponse(message=Message.assistant(f"```json\n{plan_json}\n```"))
+
+    sm = SessionManager(session_dir=tmp_path / "sessions", log_dir=tmp_path / "logs")
+    agent = TUIReActAgent(name="assistant", llm=PlanLLM())
+    app = Agent2App(agent=agent, session_manager=sm, mode="plan")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        chat_input = pilot.app.screen.query_one("#chat-input", ChatInput)
+        chat_input.clear()
+        chat_input.insert("Build project plan")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+
+        saved = sm.get_latest_session()
+        assert saved is not None
+        sess_id = saved["id"]
+
+        data = sm.load(sess_id)
+        msgs = data["agent"]["messages"]
+        user_msgs = [m for m in msgs if m.get("role") == "user"]
+        asst_msgs = [m for m in msgs if m.get("role") == "assistant"]
+
+        assert len(user_msgs) == 1
+        assert user_msgs[0]["content"] == "Build project plan"
+        assert len(asst_msgs) == 1
+        assert "Step by step plan" in asst_msgs[0]["content"]
+
+    resume_agent = TUIReActAgent(name="assistant", llm=PlanLLM())
+    resume_app = Agent2App(agent=resume_agent, session_manager=sm, resume_session_id=sess_id, mode="plan")
+    async with resume_app.run_test(size=(80, 24)) as pilot:
+        messages = pilot.app.screen.query_one("#messages", MessageList)
+        u_msgs = list(messages.query(UserMessage))
+        a_msgs = list(messages.query(AssistantMessage))
+
+        assert len(u_msgs) == 1
+        assert u_msgs[0]._text == "Build project plan"
+        assert len(a_msgs) == 1
+        assert "Step by step plan" in a_msgs[0]._content

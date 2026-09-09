@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from textual import events
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.reactive import reactive
@@ -12,6 +13,8 @@ from textual.widgets import Static
 class TabItem(Static):
     """A single tab in the TopTabBar."""
 
+    can_focus = True
+
     def __init__(self, label: str, tab_id: str, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(label, id=f"tab-{tab_id}", classes="top-tab", **kwargs)
         self.tab_id = tab_id
@@ -19,9 +22,50 @@ class TabItem(Static):
     def on_click(self) -> None:
         self.post_message(TopTabBar.TabSelected(self.tab_id))
 
+    def on_focus(self) -> None:
+        parent = self.parent
+        if isinstance(parent, TopTabBar):
+            parent.active_tab = self.tab_id
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "tab" and self.tab_id == "sessions":
+            try:
+                messages = self.screen.query_one("#messages")
+                messages.focus()
+                event.prevent_default()
+                event.stop()
+                return
+            except Exception:
+                pass
+        elif event.key in ("enter", "space"):
+            try:
+                chat_input = self.screen.query_one("#chat-input")
+                if self.tab_id == "current" and getattr(chat_input, "text", "").strip():
+                    text = chat_input.text.strip()
+                    chat_input.clear()
+                    chat_input.focus()
+                    chat_input.post_message(chat_input.Submitted(text))
+                    event.prevent_default()
+                    event.stop()
+                    return
+            except Exception:
+                pass
+            self.post_message(TopTabBar.TabSelected(self.tab_id))
+            event.prevent_default()
+            event.stop()
+        elif event.character and event.character.isprintable() and event.key not in ("tab", "enter", "escape"):
+            try:
+                chat_input = self.screen.query_one("#chat-input")
+                chat_input.focus()
+                chat_input.insert(event.character)
+                event.prevent_default()
+                event.stop()
+            except Exception:
+                pass
+
 
 class TopTabBar(Widget):
-    """Top navigation bar showing Current, Sessions, and Help tabs."""
+    """Top navigation bar showing Current and Sessions tabs."""
 
     DEFAULT_CSS = """
     TopTabBar {
@@ -44,7 +88,7 @@ class TopTabBar(Widget):
         text-align: center;
     }
 
-    .top-tab:hover {
+    .top-tab:hover, .top-tab:focus {
         color: #c9d1d9;
         background: #161b22;
     }
@@ -59,6 +103,7 @@ class TopTabBar(Widget):
     TABS = [
         ("current", "Current"),
         ("sessions", "Sessions"),
+        ("skills", "Skills"),
         ("help", "Help"),
     ]
 

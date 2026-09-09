@@ -497,6 +497,48 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
   - `ContextBar` 与 `StatusBar` 共同维护 `provider` 响应式属性，通过 `_sync_status_bar` 统一从底层 `OpenAILLM` 读取并刷新。
   - 封装统一的 `_set_busy` 管理机制，彻底消除发送 `?` 或 `help` 时引起的卡在 `processing...` 异常。
 
+### 6.19 Context / Rules / Skills 发现与 SKILL.md 解析 (`context.py`)
+
+- **分层发现策略**：
+  - Rules：`~/.config/agent2/rules` → `~/.agent2/rules` → `<cwd>/.agent2/rules`，支持 `.md` / `.txt` 与 `config.json` 的 `rules` inline 列表。
+  - Skills：按优先级从低到高扫描 `~/.config/agent2/skills`、`~/.claude/skills`、`~/.agent2/skills`、`.claude/skills`、`.agents/skills`、`.agent2/skills`，同名 Skill 由后扫描目录覆盖。
+- **手写 frontmatter 解析器**：`parse_skill_markdown()` 不依赖 PyYAML，按行解析 `name` / `description`，支持 `>` / `>`- 折叠与 `|` / `|-` 字面量块；无 frontmatter 时从正文首个标题或首行回退。
+- **按需注入与调用**：`Context.build_system_prompt()` 将规则包进 `<rules>`、技能包进 `<skills>`；`Context.get_skill()` 提供大小写不敏感查找；TUI/CLI 通过 `discover_skills()` 实现 `/skills` 与 `/<skill_name>` 动态调用。
+
+### 6.20 MCP 工具桥接与生命周期管理 (`mcp.py`)
+
+- **动态导入可选依赖**：`MCPManager.connect()` 内部 `from mcp import ClientSession, StdioServerParameters`，未安装时记录 warning 并返回空工具列表，核心功能不受影响。
+- **手动管理 context manager**：为保持 stdio 连接长期存活，使用 `transport_ctx.__aenter__()` / `session_ctx.__aenter__()`，并把 `__aexit__` 存入 `_cleanup_fns`，`close()` 逆序调用，确保子进程与连接可靠释放。
+- **Schema 与结果转换**：`_make_mcp_tool()` 把 MCP `inputSchema.properties` 转为 `ToolParameter`，用 `Tool.__new__` 构造异步 Tool；`_call()` 合并 MCP 返回的 content blocks 为字符串。
+- **配置接入**：`AppConfig.mcp_servers` 在 `build_tui_agent()` / `_build_agent()` 启动时通过 `MCPServerConfig.model_validate()` 实例化，与内置工具合并注册。
+
+### 6.21 多级审批作用域与持久化 (`app/approval.py` / `confirm_modal.py`)
+
+- **作用域语义**：
+  - `once` / `approve_once`：仅当前执行，不写入任何文件；
+  - `conversation` / `approve_conversation`：加入内存 `_auto_approved`；
+  - `project` / `approve_project`：加入内存并写入 `<project>/.agent2/approvals.json`；
+  - `always` / `approve_always`：加入内存并写入 `~/.config/agent2/approvals.json`。
+- **项目根定位**：`find_project_root()` 从 cwd 向上查找 `.agent2` / `.git` / `pyproject.toml`，避免审批文件污染用户主目录。
+- **确认卡状态机**：按钮与快捷键 `1/y`、`2/c`、`3/p`、`4/a`、`n/Esc` 映射到五个决策；`submit_decision()` 统一渲染 `✓ Approved once` / `✓ Approved in project` / `✓ Always approved` / `✗ Rejected` 徽标。
+- **Agent 侧短路**：`TUIReActAgent._execute_tool_calls()` 先查 `allow_all` / `yolo` / `SAFE_TOOLS` / `is_tool_approved()`，已授权工具不再弹窗。
+
+### 6.22 YOLO / Allow-all 与最大迭代配置 (`app.py` / `config.py` / `base.py`)
+
+- **YOLO system prompt 注入**：`set_yolo(True)` 在基础 system prompt 后追加 `YOLO_INSTRUCTION`，关闭时精确移除，避免重复追加。
+- **自动审批短路**：`is_approved = allow_all or yolo or safe_tool or is_tool_approved(...)`；`allow_all` 只跳过审批，不改变 LLM 行为。
+- **配置优先级**：`BaseAgent.__init__` 依次判断显式 `max_iterations`、`AGENT2_AGENT_MAX_ITERATIONS` 环境变量、`config.json.max_iterations`，最后回退默认值 50。
+- **旧字段迁移**：`AppConfig` 的 `model_validator(mode="before")` 把 `max_turns` / `max_rounds` 自动映射为 `max_iterations`，保持向后兼容。
+
+### 6.23 Token 用量持久化、实时刷新与 Plan 子任务聚合 (`session.py` / `app.py` / `screens/chat.py`)
+
+- **保存与恢复**：`SessionManager.save()` 写入顶层 `usage`，并支持从 `agent_data["extra"]["usage"]` 回退；`restore_agent()` 优先读取已保存 usage，旧会话无数据时 `_estimate_session_usage()` 按消息内容估算。
+- **防止跨会话泄漏**：恢复时无论当前 LLM 计数器为何值都强制覆盖；空会话恢复为 `Usage()`。
+- **模型切换保留**：`switch_model()` 保存旧 `total_usage` / `last_usage`，创建新 LLM 后回填。
+- **Plan 子任务聚合**：每个 subtask 使用独立 sub-agent；`try/finally` 包裹 `subagent.run()`，即使子任务异常或取消，也把 `subagent.llm.total_usage` 累加到父会话并刷新状态栏。
+- **实时同步**：`on_thought_received()`、`on_tool_call_completed()` 立即调用 `_sync_status_bar()`；`_run_agent()` / `_run_plan_generation()` / `_run_plan_execution()` 的 `finally` 兜底。
+- **ToolCard 标题与折叠**：`ToolTitle` 运行中显示 `⏳` 并拦截点击/折叠，完成后通过 `_get_result_title()` 生成 `Result: <命令首行 / 路径 / query>` 摘要；错误时额外挂载 `❌ Error` 状态行。
+
 
 ---
 

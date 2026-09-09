@@ -32,6 +32,8 @@ HELP_MARKDOWN = """
 - **/rewind**: Rewind to previous conversation round
 - **/fork** `[title]`: Fork current session into a new branch
 - **/export** `[path]`: Export conversation history to file
+- **/yolo** `[on|off|show]`: YOLO / Autopilot mode (auto-approve & autonomous decisions)
+- **/allow-all** `[on|off|show]`: Auto-approve all tool operations
 
 ### 📁 Context Injection
 - **#file `<path>`**: Inject specified file content into context

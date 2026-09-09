@@ -449,7 +449,7 @@ def _switch_agent_model(agent: ReActAgent, model_name: str) -> None:
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
-def _build_agent(args: argparse.Namespace) -> ReActAgent:
+def _build_agent(args: argparse.Namespace) -> tuple[ReActAgent, Any]:
     """Create an agent instance with default tools and merged config + CLI args."""
     cfg = load_config()
 
@@ -469,13 +469,36 @@ def _build_agent(args: argparse.Namespace) -> ReActAgent:
     if not args.no_tools:
         tools = [file_read, file_write, shell_exec]
 
-    return ReActAgent(
+    # ── Context: rules + skills ─────────────────────────────────
+    from agent2.context import load_context
+
+    ctx = load_context(inline_rules=cfg.rules or None)
+    system_msg = ctx.build_system_prompt(system_msg)
+
+    # ── MCP tools ───────────────────────────────────────────────
+    if cfg.mcp_servers and not args.no_tools:
+        try:
+            from agent2.mcp import MCPManager, MCPServerConfig
+
+            servers = {
+                k: MCPServerConfig.model_validate(v)
+                for k, v in cfg.mcp_servers.items()
+            }
+            manager = MCPManager(servers)
+            mcp_tools = asyncio.run(manager.connect())
+            tools.extend(mcp_tools)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("MCP init failed: %s", exc)
+
+    agent = ReActAgent(
         name="assistant",
         llm=llm,
         system_prompt=system_msg,
         tools=tools,
         verbose=True,
     )
+    return agent, ctx
 
 
 def _print_welcome(model: str, system_msg: str, tool_names: list[str]) -> None:
@@ -512,6 +535,9 @@ def _print_help() -> None:
 
     table.add_row("/model [name]", "Open model selection menu or switch directly (e.g. `/model deepseek`)")
     table.add_row("/tools", "List currently enabled tools and their descriptions")
+    table.add_row("/skills", "List available skills (use /<skill_name> [prompt] to invoke)")
+    table.add_row("/yolo [on|off|show]", "YOLO / Autopilot mode: auto-approve operations & autonomous decisions")
+    table.add_row("/allow-all [on|off|show]", "Allow-all mode: auto-approve all operations")
     table.add_row("/clear", "Clear conversation history")
     table.add_row("/help", "Show this help table")
     table.add_row("exit / quit", "Exit the chat session (or Ctrl+C / Ctrl+D)")
@@ -544,6 +570,31 @@ def _print_tools(agent: ReActAgent) -> None:
     console.print(table)
 
 
+def _print_skills(skills: list[Any]) -> None:
+    """Print available skills in a styled table."""
+    if not skills:
+        console.print("\n[dim]No skills available.[/dim]\n")
+        return
+
+    table = Table(
+        title="✨ [bold green]Available Skills[/bold green]",
+        box=box.ROUNDED,
+        header_style="bold cyan",
+        show_header=True,
+        border_style="green",
+    )
+    table.add_column("Command", style="bold green", width=20)
+    table.add_column("Description", style="white")
+    table.add_column("Source", style="dim dodger_blue1", width=24)
+
+    for s in skills:
+        table.add_row(f"/{s.name}", s.description or "(no description)", s.source or "")
+
+    console.print()
+    console.print(table)
+    console.print("[dim]Use /<skill_name> [prompt] to invoke a skill directly.[/dim]\n")
+
+
 def _read_user_input() -> str | None:
     """Read user input, returning None on EOF / exit commands."""
     try:
@@ -567,6 +618,7 @@ async def _run_single(agent: ReActAgent, prompt: str) -> None:
 async def _run_interactive(
     agent: ReActAgent,
     first_message: str | None = None,
+    context: Any | None = None,
 ) -> None:
     """Multi-turn interactive chat loop."""
     model_display = agent.llm.model
@@ -604,6 +656,85 @@ async def _run_interactive(
                 _print_tools(agent)
                 continue
 
+            elif cmd == "/skills":
+                from agent2.context import discover_skills
+
+                if not arg:
+                    skills = getattr(context, "skills", None) or discover_skills()
+                    _print_skills(skills)
+                elif arg.strip() == "reload":
+                    skills = discover_skills()
+                    if context:
+                        context.skills = skills
+                    console.print(f"\n[bold green]🔄 Reloaded {len(skills)} skills from disk.[/bold green]")
+                    _print_skills(skills)
+                else:
+                    target = arg.strip().split()[-1].lstrip("/")
+                    skill = context.get_skill(target) if context else None
+                    if not skill:
+                        for s in discover_skills():
+                            if s.name.lower() == target.lower():
+                                skill = s
+                                break
+                    if skill:
+                        console.print(f"\n[bold cyan]Skill: {skill.name}[/bold cyan]  [dim dodger_blue1]({skill.source})[/dim dodger_blue1]")
+                        console.print(f"[dim]Path: {skill.path}[/dim]\n")
+                        console.print(f"{skill.description}\n")
+                        console.rule(style="dim")
+                        console.print(skill.body or skill.content)
+                        console.print()
+                    else:
+                        console.print(f"\n[dim yellow]Skill '{target}' not found. Use /skills to view available skills.[/dim yellow]\n")
+                continue
+
+            elif cmd in ("/yolo", "/autopilot"):
+                sub = arg.lower() if arg else "show"
+                if sub == "on":
+                    if hasattr(agent, "set_yolo"):
+                        agent.set_yolo(True)
+                    else:
+                        from agent2.app.tui.app import YOLO_INSTRUCTION
+                        agent.yolo = True  # type: ignore[attr-defined]
+                        if YOLO_INSTRUCTION not in (agent.system_prompt or ""):
+                            agent.set_rule((agent.system_prompt or "") + YOLO_INSTRUCTION)
+                    console.print("\n[bold green]🚀 YOLO (Autopilot) mode ENABLED: auto-approving all operations, LLM will decide autonomously.[/bold green]\n")
+                elif sub == "off":
+                    if hasattr(agent, "set_yolo"):
+                        agent.set_yolo(False)
+                    else:
+                        from agent2.app.tui.app import YOLO_INSTRUCTION
+                        agent.yolo = False  # type: ignore[attr-defined]
+                        if agent.system_prompt and YOLO_INSTRUCTION in agent.system_prompt:
+                            agent.set_rule(agent.system_prompt.replace(YOLO_INSTRUCTION, ""))
+                    console.print("\n[bold yellow]🛑 YOLO (Autopilot) mode DISABLED.[/bold yellow]\n")
+                elif sub == "show":
+                    st = "ON" if getattr(agent, "yolo", False) else "OFF"
+                    console.print(f"\n[dim]YOLO (Autopilot) mode:[/dim] [bold]{st}[/bold]\n")
+                else:
+                    console.print("\n[dim yellow]Usage: /yolo [on|off|show][/dim yellow]\n")
+                continue
+
+            elif cmd in ("/allow-all", "/allowall"):
+                sub = arg.lower() if arg else "show"
+                if sub == "on":
+                    if hasattr(agent, "set_allow_all"):
+                        agent.set_allow_all(True)
+                    else:
+                        agent.allow_all = True  # type: ignore[attr-defined]
+                    console.print("\n[bold green]🔓 Allow-all mode ENABLED: auto-approving all operations.[/bold green]\n")
+                elif sub == "off":
+                    if hasattr(agent, "set_allow_all"):
+                        agent.set_allow_all(False)
+                    else:
+                        agent.allow_all = False  # type: ignore[attr-defined]
+                    console.print("\n[bold yellow]🔒 Allow-all mode DISABLED.[/bold yellow]\n")
+                elif sub == "show":
+                    st = "ON" if getattr(agent, "allow_all", False) else "OFF"
+                    console.print(f"\n[dim]Allow-all mode:[/dim] [bold]{st}[/bold]\n")
+                else:
+                    console.print("\n[dim yellow]Usage: /allow-all [on|off|show][/dim yellow]\n")
+                continue
+
             elif cmd == "/clear":
                 agent.reset()
                 console.print("\n[bold yellow]🧹 Conversation history cleared.[/bold yellow]\n")
@@ -618,9 +749,32 @@ async def _run_interactive(
                 break
 
             else:
-                console.print(
-                    f"[dim yellow]Unknown command: {cmd}. Type [bold]/help[/bold] for available commands.[/dim yellow]"
-                )
+                # ── Dynamic skill invocation: /<skill_name> [prompt] ──
+                from agent2.context import discover_skills
+
+                skill_name = cmd.lstrip("/")
+                skill = context.get_skill(skill_name) if context else None
+                if not skill:
+                    for s in discover_skills():
+                        if s.name.lower() == skill_name.lower():
+                            skill = s
+                            if context:
+                                context.skills = discover_skills()
+                            break
+
+                if skill:
+                    skill_prompt = (
+                        f"[Skill: {skill.name}]\n"
+                        f"Description: {skill.description}\n\n"
+                        f"{skill.content}\n\n"
+                        f"---\n\n"
+                        f"{arg or 'Please proceed with your expertise.'}"
+                    )
+                    await agent.chat(skill_prompt)
+                else:
+                    console.print(
+                        f"[dim yellow]Unknown command: {cmd}. Type [bold]/help[/bold] for available commands.[/dim yellow]"
+                    )
                 continue
 
         await agent.chat(user_input)
@@ -684,12 +838,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point."""
     args = parse_args(argv)
-    agent = _build_agent(args)
+    agent, ctx = _build_agent(args)
 
     if args.p:
         asyncio.run(_run_single(agent, args.p))
     else:
-        asyncio.run(_run_interactive(agent, first_message=args.i))
+        asyncio.run(_run_interactive(agent, first_message=args.i, context=ctx))
 
 
 # Allow ``python -m agent2.app.chat``

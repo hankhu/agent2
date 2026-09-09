@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 
     # ── Agent Defaults ──────────────────────────────────────────────
     agent_max_iterations: int = Field(
-        default=10,
+        default=50,
         description="Maximum iterations for the agent reasoning loop",
     )
     agent_verbose: bool = Field(

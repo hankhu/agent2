@@ -196,16 +196,30 @@ ToolCard .tool-result {
     margin: 0;
     padding: 0;
     border: none;
+    background: transparent;
 }
 
 ToolCard .tool-result > Contents {
     height: auto;
-    padding: 0;
+    padding: 0 1;
 }
 
+ToolCard .tool-result ToolTitle,
 ToolCard .tool-result CollapsibleTitle {
+    width: 100%;
     padding: 0;
     margin: 0;
+    background: transparent;
+}
+
+ToolCard .tool-result ToolTitle:hover,
+ToolCard .tool-result CollapsibleTitle:hover {
+    background: $panel 50%;
+}
+
+ToolCard .tool-result ToolTitle:focus,
+ToolCard .tool-result CollapsibleTitle:focus {
+    background: $panel 60%;
 }
 
 /* ── Content & Diff Folding ─────────────────────────────────── */

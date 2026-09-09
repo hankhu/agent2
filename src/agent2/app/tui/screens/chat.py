@@ -38,7 +38,7 @@ from agent2.app.tui.widgets.message_list import (
     RewindRequested,
     UserMessage,
 )
-from agent2.app.tui.widgets.nav_bar import TopTabBar
+from agent2.app.tui.widgets.nav_bar import TabItem, TopTabBar
 from agent2.app.tui.widgets.status_bar import ContextBar, StatusBar
 from agent2.app.tui.widgets.welcome_banner import WelcomeBanner
 
@@ -54,6 +54,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/agent", "Agent mode (default): full ReAct agent with tools"),
     ("/model", "Switch LLM model"),
     ("/models", "Alias for /model"),
+    ("/skills", "List available skills (use /<skill_name> to invoke)"),
     ("/clear", "Clear display"),
     ("/retry", "Retry last user query / regenerate response"),
     ("/continue", "Continue execution if paused or reached max iterations"),
@@ -65,11 +66,33 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/session", "Alias for /sessions"),
     ("/rename", "Rename current session"),
     ("/export", "Export conversation (/export [path])"),
+    ("/yolo", "YOLO / Autopilot mode: auto-approve operations & autonomous decisions (/yolo [on|off|show])"),
+    ("/autopilot", "Alias for /yolo"),
+    ("/allow-all", "Allow-all mode: auto-approve all operations (/allow-all [on|off|show])"),
     ("/help", "Show help"),
     ("/h", "Alias for /help"),
     ("/exit", "Exit application"),
     ("/quit", "Alias for /exit"),
 ]
+
+
+def get_all_commands(context: Any | None = None) -> list[tuple[str, str]]:
+    """Return all slash commands combined with available skill commands."""
+    from agent2.context import discover_skills
+
+    commands = list(SLASH_COMMANDS)
+    skills = getattr(context, "skills", None) if context else None
+    if skills is None:
+        skills = discover_skills()
+
+    seen_cmds = {cmd for cmd, _ in commands}
+    for s in skills:
+        cmd = f"/{s.name}"
+        if cmd not in seen_cmds:
+            desc = f"[Skill] {s.description[:60]}" if s.description else "[Skill]"
+            commands.append((cmd, desc))
+            seen_cmds.add(cmd)
+    return commands
 
 
 
@@ -119,7 +142,8 @@ class ChatScreen(Screen):
         Binding("escape", "cancel_selection", "Cancel Selection", priority=False),
         Binding("f1", "tab_current", "Current Tab", show=False),
         Binding("f2", "tab_sessions", "Sessions Tab", show=False),
-        Binding("f3", "tab_help", "Help Tab", show=False),
+        Binding("f3", "tab_skills", "Skills Tab", show=False),
+        Binding("f4", "tab_help", "Help Tab", show=False),
     ]
 
     def compose(self):  # type: ignore[override]
@@ -132,7 +156,10 @@ class ChatScreen(Screen):
         yield StatusBar()
 
     def on_mount(self) -> None:
-        self.query_one("#chat-input", ChatInput).focus()
+        try:
+            self.query_one("#tab-current", TabItem).focus()
+        except Exception:
+            self.query_one("#chat-input", ChatInput).focus()
         app: Agent2App = self.app  # type: ignore[assignment]
         self._current_tool_card = None
         self._thought_start: float | None = None
@@ -157,7 +184,10 @@ class ChatScreen(Screen):
     # ── Tab Navigation ──────────────────────────────────────────
 
     def on_chat_input_cycle_tab_requested(self, event: ChatInput.CycleTabRequested) -> None:
-        self.query_one(TopTabBar).cycle_tab()
+        try:
+            self.query_one("#tab-current", TabItem).focus()
+        except Exception:
+            self.query_one(TopTabBar).cycle_tab()
 
     def on_top_tab_bar_tab_selected(self, event: TopTabBar.TabSelected) -> None:
         tab_id = event.tab_id
@@ -166,6 +196,8 @@ class ChatScreen(Screen):
             self.query_one("#chat-input", ChatInput).focus()
         elif tab_id == "sessions":
             self._open_sessions_dialog()
+        elif tab_id == "skills":
+            self._open_skills_dialog()
         elif tab_id == "help":
             self._open_help_dialog()
 
@@ -176,6 +208,10 @@ class ChatScreen(Screen):
     def action_tab_sessions(self) -> None:
         self.query_one(TopTabBar).active_tab = "sessions"
         self._open_sessions_dialog()
+
+    def action_tab_skills(self) -> None:
+        self.query_one(TopTabBar).active_tab = "skills"
+        self._open_skills_dialog()
 
     def action_tab_help(self) -> None:
         self.query_one(TopTabBar).active_tab = "help"
@@ -213,7 +249,6 @@ class ChatScreen(Screen):
             app.load_session(session_id)
             messages.clear_messages()
             self._rebuild_messages()
-            self._reset_usage()
             self.query_one(StatusBar).reset_timer()
             try:
                 self.query_one(ContextBar).reset_timer()
@@ -227,6 +262,40 @@ class ChatScreen(Screen):
         self.app.push_screen(
             SessionSelectScreen(sessions, session_manager=app.session_manager),
             callback=on_session,
+        )
+
+    def _open_skills_dialog(self) -> None:
+        from agent2.app.tui.screens.skill_select import SkillSelectScreen
+        from agent2.context import discover_skills
+
+        app: Agent2App = self.app  # type: ignore[assignment]
+        messages = self.query_one("#messages", MessageList)
+
+        skills = discover_skills()
+        if getattr(app, "context", None):
+            app.context.skills = skills
+
+        if not skills:
+            messages.add_system_message(
+                "No skills found.\n"
+                "[dim]Place skills in ~/.agent2/skills/<name>/SKILL.md, "
+                "~/.claude/skills/<name>/SKILL.md, or .agent2/skills/<name>/SKILL.md.[/dim]"
+            )
+            self.query_one(TopTabBar).active_tab = "current"
+            self.query_one("#chat-input", ChatInput).focus()
+            return
+
+        def on_skill(skill_name: str | None) -> None:
+            self.query_one(TopTabBar).active_tab = "current"
+            chat_input = self.query_one("#chat-input", ChatInput)
+            chat_input.focus()
+            if skill_name:
+                chat_input.value = f"/{skill_name} "
+                chat_input.cursor_position = len(chat_input.value)
+
+        self.app.push_screen(
+            SkillSelectScreen(skills),
+            callback=on_skill,
         )
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
@@ -310,16 +379,22 @@ class ChatScreen(Screen):
 
     # ── Completion ──────────────────────────────────────────────
 
+    def _get_completions(self) -> list[tuple[str, str]]:
+        app: Agent2App = self.app  # type: ignore[assignment]
+        ctx = getattr(app, "context", None)
+        return get_all_commands(ctx)
+
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         """Show / update / hide the completion list as the user types."""
         text = event.text_area.text
         # Show completions only when text starts with / and has no space yet
         if text.startswith("/") and " " not in text:
             prefix = text.lower()
+            all_commands = self._get_completions()
             matches = [
                 (cmd, desc)
-                for cmd, desc in SLASH_COMMANDS
-                if cmd.startswith(prefix)
+                for cmd, desc in all_commands
+                if cmd.lower().startswith(prefix)
             ]
             if matches:
                 self._show_completion(matches)
@@ -351,10 +426,12 @@ class ChatScreen(Screen):
             self._accept_completion(str(option_id))
 
     def _show_completion(self, matches: list[tuple[str, str]]) -> None:
+        from rich.markup import escape
+
         completion = self.query_one("#completion-list", OptionList)
         completion.clear_options()
         for cmd, desc in matches:
-            completion.add_option(Option(f"{cmd}  [dim]{desc}[/dim]", id=cmd))
+            completion.add_option(Option(f"{escape(cmd)}  [dim]{escape(desc)}[/dim]", id=cmd))
         completion.highlighted = 0
         completion.add_class("visible")
         self.query_one("#chat-input", ChatInput).show_completion = True
@@ -418,7 +495,6 @@ class ChatScreen(Screen):
             result = await agent.chat(processed)
             messages.add_assistant_message(result, message_index=len(agent._messages) - 1)
             app.session_manager.log_event(app.session_id, "ASSISTANT", result)
-            self._sync_status_bar()
         except asyncio.CancelledError:
             messages.add_system_message("⛔ Interrupted by user.")
             app.session_manager.log_event(app.session_id, "CANCELLED", "Interrupted by user.")
@@ -429,6 +505,7 @@ class ChatScreen(Screen):
             agent.log = original_log
             if generation == self._run_generation:
                 self._set_busy(False)
+            self._sync_status_bar()
 
         # Auto-save (skipped when the conversation has no input at all)
         self._save_session()
@@ -460,9 +537,10 @@ class ChatScreen(Screen):
                 self._plan_goal = processed
 
             md_table = format_plan_markdown(plan)
-            messages.add_assistant_message(md_table)
+            app.agent._messages.append(LLMMessage.user(processed))
+            app.agent._messages.append(LLMMessage.assistant(md_table))
+            messages.add_assistant_message(md_table, message_index=len(app.agent._messages) - 1)
             app.session_manager.log_event(app.session_id, "PLAN_PROPOSAL", md_table)
-            self._sync_status_bar()
         except asyncio.CancelledError:
             messages.add_system_message("⛔ Interrupted by user.")
             app.session_manager.log_event(app.session_id, "CANCELLED", "Interrupted by user.")
@@ -472,6 +550,7 @@ class ChatScreen(Screen):
         finally:
             if generation == self._run_generation:
                 self._set_busy(False)
+            self._sync_status_bar()
 
         self._save_session()
 
@@ -534,8 +613,14 @@ class ChatScreen(Screen):
                 subagent.approval_callback = self._request_approval
                 self._thought_start = time.monotonic()
 
-                # Execute subtask
-                res = await subagent.run(subtask_prompt)
+                # Execute subtask. Aggregate usage in ``finally`` so tokens
+                # consumed by a failed or cancelled subtask are still counted.
+                try:
+                    res = await subagent.run(subtask_prompt)
+                finally:
+                    if hasattr(subagent.llm, "total_usage") and subagent.llm.total_usage:
+                        app.agent.llm.total_usage = app.agent.llm.total_usage + subagent.llm.total_usage
+                    self._sync_status_bar()
                 task_results[task.id] = res
                 recorded_results.append({
                     "id": task.id,
@@ -553,11 +638,11 @@ class ChatScreen(Screen):
                 goal=original_goal,
                 task_results=recorded_results,
             )
-            messages.add_assistant_message(final_answer)
             app.session_manager.log_event(app.session_id, "FINAL_ANSWER", final_answer)
-            app.agent._messages.append(LLMMessage.user(original_goal))
+            if not any(m.role == Role.USER and m.content == original_goal for m in app.agent._messages):
+                app.agent._messages.append(LLMMessage.user(original_goal))
             app.agent._messages.append(LLMMessage.assistant(final_answer))
-            self._sync_status_bar()
+            messages.add_assistant_message(final_answer, message_index=len(app.agent._messages) - 1)
 
         except asyncio.CancelledError:
             messages.add_system_message("⛔ Interrupted by user.")
@@ -568,6 +653,7 @@ class ChatScreen(Screen):
         finally:
             if generation == self._run_generation:
                 self._set_busy(False)
+            self._sync_status_bar()
 
         self._save_session()
 
@@ -594,6 +680,7 @@ class ChatScreen(Screen):
         elapsed = time.monotonic() - (self._thought_start or time.monotonic())
         messages = self.query_one("#messages", MessageList)
         messages.add_thinking_block(event.content, event.step, elapsed)
+        self._sync_status_bar()
 
     def on_tool_call_started(self, event: ToolCallStarted) -> None:
         messages = self.query_one("#messages", MessageList)
@@ -610,6 +697,7 @@ class ChatScreen(Screen):
             self._current_tool_card = None
             self.query_one("#messages", MessageList)._maybe_scroll_to_bottom()
         self._set_busy(True, "Processing…")
+        self._sync_status_bar()
 
     def on_status_text(self, event: StatusText) -> None:
         self._set_busy(True, event.text)
@@ -671,6 +759,52 @@ class ChatScreen(Screen):
                 messages.add_system_message(
                     "🤖 已切换至 Agent 模式（缺省模式）。完整工具调用已就绪。"
                 )
+
+        elif cmd in ("/yolo", "/autopilot"):
+            sub = arg.lower() if arg else "show"
+            if sub == "on":
+                if hasattr(app.agent, "set_yolo"):
+                    app.agent.set_yolo(True)
+                else:
+                    app.agent.yolo = True  # type: ignore[attr-defined]
+                self._sync_status_bar()
+                messages.add_system_message(
+                    "🚀 YOLO (Autopilot) 模式已开启：自动允许所有操作，由 LLM 自行判断并做出选择。"
+                )
+            elif sub == "off":
+                if hasattr(app.agent, "set_yolo"):
+                    app.agent.set_yolo(False)
+                else:
+                    app.agent.yolo = False  # type: ignore[attr-defined]
+                self._sync_status_bar()
+                messages.add_system_message("🛑 YOLO (Autopilot) 模式已关闭。")
+            elif sub == "show":
+                status_text = "ON" if getattr(app.agent, "yolo", False) else "OFF"
+                messages.add_system_message(f"YOLO (Autopilot) 模式当前状态: [bold]{status_text}[/bold]")
+            else:
+                messages.add_system_message("Usage: /yolo [on|off|show]")
+
+        elif cmd in ("/allow-all", "/allowall"):
+            sub = arg.lower() if arg else "show"
+            if sub == "on":
+                if hasattr(app.agent, "set_allow_all"):
+                    app.agent.set_allow_all(True)
+                else:
+                    app.agent.allow_all = True  # type: ignore[attr-defined]
+                self._sync_status_bar()
+                messages.add_system_message("🔓 Allow-all 模式已开启：自动允许所有操作。")
+            elif sub == "off":
+                if hasattr(app.agent, "set_allow_all"):
+                    app.agent.set_allow_all(False)
+                else:
+                    app.agent.allow_all = False  # type: ignore[attr-defined]
+                self._sync_status_bar()
+                messages.add_system_message("🔒 Allow-all 模式已关闭。")
+            elif sub == "show":
+                status_text = "ON" if getattr(app.agent, "allow_all", False) else "OFF"
+                messages.add_system_message(f"Allow-all 模式当前状态: [bold]{status_text}[/bold]")
+            else:
+                messages.add_system_message("Usage: /allow-all [on|off|show]")
 
         elif cmd == "/clear":
             messages.clear_messages()
@@ -849,6 +983,8 @@ class ChatScreen(Screen):
                 "  /agent [prompt] Agent mode (default): full autonomous agent with tools\n"
                 "\n[bold cyan]Commands[/bold cyan]\n"
                 "  /model [name]   Switch model\n"
+                "  /skills         List available skills\n"
+                "  /<skill> [msg]  Invoke a skill by name\n"
                 "  /clear          Clear display\n"
                 "  /retry          Retry last query / regenerate response\n"
                 "  /continue       Continue execution if paused or reached max iterations\n"
@@ -859,6 +995,8 @@ class ChatScreen(Screen):
                 "  /resume [id]    Resume session\n"
                 "  /rename <title> Rename current session\n"
                 "  /export [path]  Export conversation history\n"
+                "  /yolo [on|off|show]      YOLO / Autopilot mode: auto-approve operations & autonomous decisions\n"
+                "  /allow-all [on|off|show] Allow-all mode: auto-approve all operations\n"
                 "  /help           This help\n"
                 "  /exit           Quit\n"
                 "\n[bold cyan]Context Injection[/bold cyan]\n"
@@ -875,10 +1013,69 @@ class ChatScreen(Screen):
                 )
             self.app.exit()
 
+        elif cmd == "/skills":
+            from agent2.context import discover_skills
+
+            if not arg:
+                self._open_skills_dialog()
+            elif arg.strip() == "reload":
+                skills = discover_skills()
+                if getattr(app, "context", None):
+                    app.context.skills = skills
+                messages.add_system_message(
+                    f"🔄 Reloaded {len(skills)} skills from disk.\n"
+                    + "\n".join(f"  • [bold green]/{s.name}[/bold green] ({s.source})" for s in skills)
+                )
+            else:
+                target = arg.strip().split()[-1].lstrip("/")
+                ctx = getattr(app, "context", None)
+                skill = ctx.get_skill(target) if ctx else None
+                if not skill:
+                    for s in discover_skills():
+                        if s.name.lower() == target.lower():
+                            skill = s
+                            break
+                if skill:
+                    messages.add_system_message(
+                        f"[bold cyan]Skill: {skill.name}[/bold cyan]  [dim dodger_blue1]({skill.source})[/dim dodger_blue1]\n"
+                        f"[dim]Path: {skill.path}[/dim]\n\n"
+                        f"{skill.description}\n\n"
+                        f"---\n\n"
+                        f"{skill.body or skill.content}"
+                    )
+                else:
+                    messages.add_system_message(f"Skill '{target}' not found. Type /skills to browse.")
+
         else:
-            messages.add_system_message(
-                f"Unknown command: {cmd}.  Type /help for help."
-            )
+            # ── Dynamic skill invocation: /<skill_name> [prompt] ──
+            from agent2.context import discover_skills
+
+            ctx = getattr(app, "context", None)
+            skill_name = cmd.lstrip("/")
+            skill = ctx.get_skill(skill_name) if ctx else None
+            if not skill:
+                for s in discover_skills():
+                    if s.name.lower() == skill_name.lower():
+                        skill = s
+                        if ctx:
+                            ctx.skills = discover_skills()
+                        break
+
+            if skill:
+                skill_prompt = (
+                    f"[Skill: {skill.name}]\n"
+                    f"Description: {skill.description}\n\n"
+                    f"{skill.content}\n\n"
+                    f"---\n\n"
+                    f"{arg or 'Please proceed with your expertise.'}"
+                )
+                display_msg = f"/{skill.name} {arg}" if arg else f"/{skill.name}"
+                await self._mount_and_render_user_message(display_msg)
+                self._run_agent(skill_prompt)
+            else:
+                messages.add_system_message(
+                    f"Unknown command: {cmd}.  Type /help for help."
+                )
 
     def _handle_resume(self, arg: str | None) -> None:
         app: Agent2App = self.app  # type: ignore[assignment]
@@ -891,7 +1088,6 @@ class ChatScreen(Screen):
                 app.load_session(match["id"])
                 messages.clear_messages()
                 self._rebuild_messages()
-                self._reset_usage()
                 self.query_one(StatusBar).reset_timer()
                 self._sync_status_bar()
                 messages.add_system_message(
@@ -908,11 +1104,34 @@ class ChatScreen(Screen):
         """Re-populate the message list from the agent's history."""
         app: Agent2App = self.app  # type: ignore[assignment]
         messages = self.query_one("#messages", MessageList)
+        tool_results: dict[str, Any] = {}
+        for m in app.agent.messages:
+            if m.role == Role.TOOL and m.tool_result is not None:
+                tool_results[m.tool_result.tool_call_id] = m.tool_result
+
         for idx, msg in enumerate(app.agent.messages):
             if msg.role == Role.USER:
                 messages.add_user_message(msg.content or "", message_index=idx)
             elif msg.role == Role.ASSISTANT:
-                messages.add_assistant_message(msg.content or "", message_index=idx)
+                if msg.content:
+                    messages.add_assistant_message(msg.content, message_index=idx)
+                if msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        tr = tool_results.get(tc.id)
+                        if tr is not None:
+                            messages.add_tool_card(
+                                tc.name,
+                                tc.arguments or {},
+                                result=tr.content,
+                                is_error=tr.is_error,
+                            )
+                        else:
+                            messages.add_tool_card(
+                                tc.name,
+                                tc.arguments or {},
+                            )
+                elif not msg.content:
+                    messages.add_assistant_message("", message_index=idx)
 
     # ── Interrupt / Quit / Selection ────────────────────────────
 
@@ -1168,14 +1387,16 @@ class ChatScreen(Screen):
         app: Agent2App = self.app  # type: ignore[assignment]
         if not self._session_has_input():
             return
-        app.session_manager.save(app.session_id, app.agent.to_dict())
+        usage = getattr(app.agent.llm, "total_usage", None)
+        usage_data = usage.model_dump() if usage else None
+        app.session_manager.save(
+            app.session_id, app.agent.to_dict(), usage=usage_data
+        )
 
     def _reset_usage(self) -> None:
         """Zero the LLM usage counters and the status bar token readouts.
 
-        Called when the current conversation changes (``/new``, ``/resume``):
-        restored sessions have no persisted usage, so showing the previous
-        conversation's totals would be misleading.
+        Called when a new conversation starts (``/new``).
         """
         app: Agent2App = self.app  # type: ignore[assignment]
         llm = app.agent.llm
@@ -1211,6 +1432,8 @@ class ChatScreen(Screen):
 
         mode_str = getattr(app, "mode", "agent").upper()
         status.mode = mode_str
+        status.yolo = getattr(app.agent, "yolo", False)
+        status.allow_all = getattr(app.agent, "allow_all", False)
         status.model_name = llm.model
         status.provider = provider_disp
         ctx_win = getattr(llm, "context_window", 0) or 0

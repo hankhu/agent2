@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import os
 from abc import ABC, abstractmethod
 from typing import Any, Self
 
@@ -50,7 +51,17 @@ class BaseAgent(ABC):
         self.name = name
         self.llm = llm if llm is not None else create_llm()
         self.system_prompt = system_prompt
-        self.max_iterations = max_iterations or settings.agent_max_iterations
+        if max_iterations is not None:
+            self.max_iterations = max_iterations
+        elif "AGENT2_AGENT_MAX_ITERATIONS" in os.environ:
+            self.max_iterations = settings.agent_max_iterations
+        else:
+            try:
+                from agent2.app.config import load_config
+
+                self.max_iterations = load_config().max_iterations
+            except Exception:
+                self.max_iterations = settings.agent_max_iterations
         self.verbose = verbose if verbose is not None else settings.agent_verbose
 
         # Set up tool registry
@@ -286,10 +297,16 @@ class BaseAgent(ABC):
             if tool_names:
                 try:
                     import agent2.tools.builtin as builtin_module
+                    seen_names: set[str] = set()
                     for attr_name in dir(builtin_module):
                         val = getattr(builtin_module, attr_name)
-                        if isinstance(val, Tool) and val.name in tool_names:
+                        if (
+                            isinstance(val, Tool)
+                            and val.name in tool_names
+                            and val.name not in seen_names
+                        ):
                             resolved_tools.append(val)
+                            seen_names.add(val.name)
                 except (ImportError, AttributeError) as exc:
                     import logging
                     logging.getLogger(__name__).warning("Failed to load builtin tools: %s", exc)

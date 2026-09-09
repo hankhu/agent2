@@ -257,3 +257,58 @@
   - 涵盖组件挂载、标签循环切换、Rich 渲染、提供商与 host 解析、方括号转义及状态栏同步。
   - 全量 104 项单元测试全部通过。
 
+
+
+## 15. Context/Skills、MCP、审批作用域、YOLO/Allow-all、配置化迭代与 Token 用量持久化 (v0.1.3.13)
+
+- **Context 与 Skills 加载体系**（`src/agent2/context.py`）：
+  - `SkillInfo` / `Context` 数据类；`Context.build_system_prompt()` 将 `<rules>` 与 `<skills>` 注入 system prompt。
+  - Rules 搜索路径：`~/.config/agent2/rules`、`~/.agent2/rules`、`<cwd>/.agent2/rules`，支持 `.md` / `.txt` 与 `config.json` 中的 inline rules。
+  - Skills 搜索路径按优先级从低到高：`~/.config/agent2/skills`、`~/.claude/skills`、`~/.agent2/skills`、`.claude/skills`、`.agents/skills`、`.agent2/skills`；后扫描目录覆盖同名技能。
+  - `parse_skill_markdown()` 解析 `SKILL.md` YAML frontmatter，支持 `name` / `description`、`>` / `|` 折叠与多行值；无 frontmatter 时从正文标题或首行回退。
+  - TUI 新增 `SkillSelectScreen`（`screens/skill_select.py`）：实时过滤、上下导航、`r` 重载、`Enter` 调用；`TopTabBar` 新增 `Skills` 标签（`F3`）。
+  - `ChatScreen` 的 `/skills`、`/skills reload`、动态 `/<skill_name> [prompt]` 均接入 `Context.get_skill()` 与 `discover_skills()`；斜杠命令补全列表自动包含技能名。
+
+- **MCP (Model Context Protocol) 客户端**（`src/agent2/mcp.py`）：
+  - `MCPServerConfig` 支持 stdio `command` / `args` / `env` 与 SSE `url` 配置。
+  - `MCPManager.connect()` 动态导入可选依赖 `mcp`，通过 `stdio_client` + `ClientSession` 建立长连接，调用 `session.list_tools()` 发现工具。
+  - `_make_mcp_tool()` 将 MCP `inputSchema` 转换为 agent2 `ToolSchema`，并用 `Tool.__new__` 构造带异步 `call_fn` 的 Tool；MCP 返回的 content blocks 合并为字符串结果。
+  - `MCPManager.close()` 逆序执行 context manager 清理；`build_tui_agent()` 与 `_build_agent()` 在启动时读取 `config.mcp_servers` 并合并 MCP tools。
+  - `pyproject.toml` 增加 optional dependency `mcp = ["mcp>=1.0"]`。
+
+- **多级工具审批作用域**（`src/agent2/app/approval.py` + `widgets/confirm_modal.py`）：
+  - 审批作用域：`once` / `conversation` / `project` / `always`；分别对应不持久化、当前会话内存、项目级 `.agent2/approvals.json`、全局 `~/.config/agent2/approvals.json`。
+  - `is_tool_approved()` 依次检查 conversation set、project 文件、global 文件；`record_approval()` 负责持久化。
+  - `find_project_root()` 以 `.agent2` / `.git` / `pyproject.toml` 向上查找项目根目录。
+  - ConfirmCard 按钮改为 `[1/y] Approve once`、`[c] In conversation`、`[p] In project`、`[a] Always approve`、`[n] Reject`；`max_iterations` 审批仍保持单次/始终两档语义。
+
+- **YOLO / Allow-all 自动审批**（`app.py` + `screens/chat.py` + `app/chat.py`）：
+  - `TUIReActAgent.set_yolo()` 将 `YOLO_INSTRUCTION` 追加到 system prompt；`set_allow_all()` 仅设置自动审批标志。
+  - 工具审批判断改为 `allow_all or yolo or safe_tool or is_tool_approved(...)`；`_auto_approved` 与 project/global 审批文件统一走 `record_approval()`。
+  - `/yolo on|off|show`、`/allow-all on|off|show` 同时支持 TUI 与 Chat CLI；状态栏 `StatusBar` 与 `ContextBar` 渲染 `YOLO` / `ALLOW-ALL` 徽标。
+  - `_get_extra_state()` / `_restore_extra_state()` 持久化 `yolo`、`allow_all`、`mode`、`auto_approved` 与 `llm.total_usage`。
+
+- **最大迭代次数配置化**（`utils/config.py` + `app/config.py` + `agent/base.py` + `app/tui/app.py`）：
+  - `Settings.agent_max_iterations` 默认值 10 → 50；`AppConfig.max_iterations` 默认 50，并支持 `max_turns` / `max_rounds` 别名迁移。
+  - `BaseAgent.__init__` 优先级：显式参数 > `AGENT2_AGENT_MAX_ITERATIONS` 环境变量 > `config.json.max_iterations` > 默认值。
+  - `build_tui_agent(max_iterations=...)` 透传到 `TUIReActAgent`，Plan 子任务可通过配置继承。
+  - `BaseAgent.from_dict()` 恢复内置工具时增加 `seen_names` 去重。
+
+- **Session 预览与 Token 用量持久化**（`session.py` + `app.py` + `screens/chat.py` + `widgets/tool_card.py`）：
+  - `SessionManager.get_session_preview()` 返回富文本转录预览；`list_sessions()` 增加 `message_count` / `preview`；`SessionSelectScreen` 增加右侧预览列，并支持按预览内容过滤。
+  - `SessionManager.save()` 增加顶层 `usage` 字段，支持从 `agent_data["extra"]["usage"]` 自动提取与旧文件回退。
+  - `restore_agent()` 恢复 `usage`；旧会话无 usage 时 `_estimate_session_usage()` 按消息内容估算，并强制覆盖 live 计数器，避免跨会话泄漏。
+  - `Agent2App.switch_model()` 保留 `total_usage` / `last_usage`；`_run_plan_execution()` 在子任务 `finally` 中把 `subagent.llm.total_usage` 聚合到父会话（失败/取消也计入）。
+  - `_run_agent()` / `_run_plan_generation()` / `_run_plan_execution()` 的 `finally` 统一调用 `_sync_status_bar()`；`on_thought_received()` / `on_tool_call_completed()` 实时刷新。
+  - `ToolCard` 新增 `ToolTitle` / `ToolCollapsible`：运行中显示 `⏳` 且禁止折叠，完成后标题显示操作摘要（命令首行 / 文件路径 / query），错误额外显示 `❌ Error`。
+
+- **测试覆盖**：
+  - 新增 `tests/test_context.py`、`test_skills_ui.py`、`test_mcp.py`、`test_approval_scopes.py`、`test_yolo_allow_all.py`、`test_max_iterations_config.py`、`test_session_preview.py`、`test_tool_result_title.py`、`test_token_usage.py`。
+  - 全量测试从 104 项扩展至 166 项，全部通过。
+
+- **主要涉及文件**：
+  - `src/agent2/context.py`、`src/agent2/mcp.py`、`src/agent2/app/approval.py`
+  - `src/agent2/app/config.py`、`src/agent2/utils/config.py`、`src/agent2/agent/base.py`
+  - `src/agent2/app/tui/app.py`、`src/agent2/app/tui/screens/chat.py`、`src/agent2/app/tui/session.py`
+  - `src/agent2/app/tui/screens/skill_select.py`、`session_select.py`、`widgets/confirm_modal.py`、`tool_card.py`
+  - `tests/test_context.py` 等新增测试文件

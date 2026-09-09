@@ -189,6 +189,10 @@ class ModelSelectScreen(ModalScreen[str]):
     def on_top_tab_bar_tab_selected(self, event: TopTabBar.TabSelected) -> None:
         if event.tab_id == "current":
             self.dismiss("")
+        elif event.tab_id == "skills":
+            from agent2.app.tui.screens.skill_select import SkillSelectScreen
+            self.dismiss("")
+            self.app.push_screen(SkillSelectScreen())
         elif event.tab_id == "help":
             self.app.push_screen(HelpScreen())
 
