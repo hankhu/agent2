@@ -13,7 +13,6 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
-from agent2.app.tui.screens.help import HelpScreen
 from agent2.app.tui.session import SessionManager
 from agent2.app.tui.widgets.nav_bar import TopTabBar
 
@@ -43,6 +42,9 @@ class SessionSearchInput(Input):
     class NavigateDown(Message):
         pass
 
+    class DeleteArmRequested(Message):
+        pass
+
     class DeleteRequested(Message):
         pass
 
@@ -50,6 +52,26 @@ class SessionSearchInput(Input):
         pass
 
     async def _on_key(self, event: events.Key) -> None:
+        # Delete is a two-key sequence: Ctrl+X, then X.
+        if event.key in ("ctrl+x", "ctrl-x"):
+            self.post_message(self.DeleteArmRequested())
+            event.prevent_default()
+            event.stop()
+            return
+        if getattr(self.screen, "_delete_armed", False):
+            if event.key in ("x", "X", "shift+x"):
+                self.post_message(self.DeleteRequested())
+                event.prevent_default()
+                event.stop()
+                return
+            if event.key == "escape":
+                event.prevent_default()
+                event.stop()
+                return
+            clear_armed = getattr(self.screen, "_clear_delete_armed", None)
+            if clear_armed is not None:
+                clear_armed()
+
         if event.key == "up":
             self.post_message(self.NavigateUp())
             event.prevent_default()
@@ -57,11 +79,6 @@ class SessionSearchInput(Input):
             return
         elif event.key == "down":
             self.post_message(self.NavigateDown())
-            event.prevent_default()
-            event.stop()
-            return
-        elif event.key == "delete" or (not self.value.strip() and event.key == "d"):
-            self.post_message(self.DeleteRequested())
             event.prevent_default()
             event.stop()
             return
@@ -81,7 +98,8 @@ class SessionSelectScreen(ModalScreen[str]):
     - Up / Down: Navigate sessions
     - Enter: Select highlighted session to resume (or submit rename)
     - e / r: Rename highlighted session
-    - d / delete: Delete highlighted session
+    - Ctrl+X, then X: Delete highlighted session
+    - Tab: Switch to the next top-level panel
     - Esc: Cancel / back to current session
     """
 
@@ -185,11 +203,17 @@ class SessionSelectScreen(ModalScreen[str]):
 
     BINDINGS = [
         Binding("escape", "cancel_or_close", "Close", priority=True),
+        Binding("tab", "cycle_tab_next", "Next Tab", priority=True, show=False),
+        Binding("shift+tab", "cycle_tab_prev", "Previous Tab", priority=True, show=False),
         Binding("up", "nav_up", "Up", show=False),
         Binding("down", "nav_down", "Down", show=False),
         Binding("e", "edit_title", "Rename", show=False),
         Binding("r", "edit_title", "Rename", show=False),
-        Binding("d", "delete_session", "Delete", show=False),
+        Binding("ctrl+x", "arm_delete", "Delete", show=False),
+        Binding("ctrl-x", "arm_delete", "Delete", show=False),
+        Binding("x", "confirm_delete", "Confirm Delete", show=False),
+        Binding("X", "confirm_delete", "Confirm Delete", show=False),
+        Binding("shift+x", "confirm_delete", "Confirm Delete", show=False),
     ]
 
     def __init__(
@@ -203,6 +227,7 @@ class SessionSelectScreen(ModalScreen[str]):
         self._filtered_sessions: list[dict[str, Any]] = list(sessions)
         self._renaming_session: dict[str, Any] | None = None
         self._preview_cache: dict[str, str] = {}
+        self._delete_armed: bool = False
 
     def compose(self):  # type: ignore[override]
         yield TopTabBar(id="top-nav")
@@ -211,7 +236,7 @@ class SessionSelectScreen(ModalScreen[str]):
                 " [dodger_blue1]• Tip:[/dodger_blue1] [bold]/sessions[/bold]\n"
                 "   [dim]└ Manage, resume, rename, or delete conversation sessions[/dim]\n\n"
                 "[dim]Resume a saved session to restore your previous context and conversation history.\n"
-                "Use 'e' to rename, 'd' to delete, and Enter to select.[/dim]",
+                "Use 'e' to rename, Ctrl+X then X to delete, and Enter to select.[/dim]",
                 id="session-tip",
             )
             yield Static("Saved sessions", id="session-group-header")
@@ -222,7 +247,7 @@ class SessionSelectScreen(ModalScreen[str]):
                         yield Static(id="session-preview-content")
             yield SessionSearchInput(placeholder="❯ Search sessions...", id="session-search")
             yield Static(
-                "[dim]↑/↓ to navigate  ·  enter to select  ·  e rename  ·  d delete  ·  esc to cancel[/dim]",
+                "[dim]↑/↓ select  ·  enter resume  ·  e/r rename  ·  ctrl+x, x delete  ·  tab next  ·  esc close[/dim]",
                 id="session-hint",
             )
 
@@ -270,11 +295,13 @@ class SessionSelectScreen(ModalScreen[str]):
             self._show_preview(None)
             return
 
+        from rich.markup import escape
+
         for s in self._filtered_sessions:
-            title = s.get("title") or "(untitled)"
-            sid = str(s.get("id", ""))[:8]
+            title = escape(str(s.get("title") or "(untitled)"))
+            sid = escape(str(s.get("id", ""))[:8])
             saved_at = float(s.get("saved_at", 0) or 0)
-            time_str = _fmt_time_ago(saved_at)
+            time_str = escape(_fmt_time_ago(saved_at))
             
             line = f"  {title:<35}  [dim]·  {sid}  ·  {time_str}[/dim]"
             opt_list.add_option(Option(line, id=str(s.get("id", ""))))
@@ -283,15 +310,24 @@ class SessionSelectScreen(ModalScreen[str]):
         first_id = str(self._filtered_sessions[0].get("id", ""))
         self._show_preview(first_id)
 
+    def action_cycle_tab_next(self) -> None:
+        self.query_one(TopTabBar).cycle_tab(1)
+
+    def action_cycle_tab_prev(self) -> None:
+        self.query_one(TopTabBar).cycle_tab(-1)
+
     def on_top_tab_bar_tab_selected(self, event: TopTabBar.TabSelected) -> None:
         if event.tab_id == "current":
+            self._clear_delete_armed()
             self.dismiss("")
         elif event.tab_id == "skills":
             from agent2.app.tui.screens.skill_select import SkillSelectScreen
+            self._clear_delete_armed()
             self.dismiss("")
             self.app.push_screen(SkillSelectScreen())
-        elif event.tab_id == "help":
-            self.app.push_screen(HelpScreen())
+        elif event.tab_id == "sessions":
+            self._clear_delete_armed()
+            self._populate_options(self.query_one("#session-search", SessionSearchInput).value)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if self._renaming_session is not None:
@@ -338,8 +374,39 @@ class SessionSelectScreen(ModalScreen[str]):
     def on_session_search_input_rename_requested(self, event: SessionSearchInput.RenameRequested) -> None:
         self.action_edit_title()
 
+    def on_session_search_input_delete_arm_requested(
+        self, event: SessionSearchInput.DeleteArmRequested
+    ) -> None:
+        self.action_arm_delete()
+
     def on_session_search_input_delete_requested(self, event: SessionSearchInput.DeleteRequested) -> None:
         self.action_delete_session()
+
+    def action_arm_delete(self) -> None:
+        if self._renaming_session is not None:
+            return
+        self._delete_armed = True
+        try:
+            self.query_one("#session-hint", Static).update(
+                "[bold red]Delete armed: press x to confirm, any other key cancels[/bold red]"
+            )
+        except Exception:
+            pass
+
+    def _clear_delete_armed(self) -> None:
+        if not self._delete_armed:
+            return
+        self._delete_armed = False
+        try:
+            self.query_one("#session-hint", Static).update(
+                "[dim]↑/↓ select  ·  enter resume  ·  e/r rename  ·  ctrl+x, x delete  ·  tab next  ·  esc close[/dim]"
+            )
+        except Exception:
+            pass
+
+    def action_confirm_delete(self) -> None:
+        if self._delete_armed:
+            self.action_delete_session()
 
     def action_nav_up(self) -> None:
         self.on_session_search_input_navigate_up(SessionSearchInput.NavigateUp())
@@ -368,6 +435,7 @@ class SessionSelectScreen(ModalScreen[str]):
     def action_delete_session(self) -> None:
         if self._renaming_session is not None:
             return
+        self._clear_delete_armed()
         opt_list = self.query_one("#session-list", OptionList)
         h = opt_list.highlighted
         if h is not None and 0 <= h < len(self._filtered_sessions):
@@ -389,6 +457,9 @@ class SessionSelectScreen(ModalScreen[str]):
             self._populate_options(inp.value)
 
     def action_cancel_or_close(self) -> None:
+        if self._delete_armed:
+            self._clear_delete_armed()
+            return
         if self._renaming_session is not None:
             self._exit_rename_mode()
         else:

@@ -131,6 +131,7 @@ class StatusBar(Static):
 
     SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
+    active_tab: reactive[str] = reactive("current")
     mode: reactive[str] = reactive("AGENT")
     yolo: reactive[bool] = reactive(False)
     allow_all: reactive[bool] = reactive(False)
@@ -179,7 +180,18 @@ class StatusBar(Static):
         grid.add_column(justify="left", no_wrap=True)
         grid.add_column(justify="right", no_wrap=True)
 
-        left = "[dim]+ sessions  ·  / commands  ·  ? help  ·  tab switch[/dim]"
+        if self.active_tab == "sessions":
+            left = (
+                "[dim]↑/↓ select  ·  enter resume  ·  ctrl+x, x delete  ·  "
+                "e/r rename  ·  tab next  ·  esc close[/dim]"
+            )
+        elif self.active_tab == "skills":
+            left = "[dim]↑/↓ select  ·  enter invoke  ·  r reload  ·  tab next  ·  esc close[/dim]"
+        else:
+            left = (
+                "[dim]? shortcuts  ·  + sessions  ·  / commands  ·  tab switch  ·  "
+                "ctrl+c interrupt  ·  ctrl+o results  ·  ctrl+d quit  ·  esc[/dim]"
+            )
 
         mode_upper = self.mode.upper()
         if mode_upper == "PLAN":

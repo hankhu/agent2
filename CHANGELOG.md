@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.3.14] - 2026-09-09
+
+### Added
+- **内联快捷键面板 (`ShortcutHelp`)**：
+  - 新增 `src/agent2/app/tui/widgets/shortcut_help.py`，在输入框正上方渲染紧凑的按键速查面板（Chat / Sessions / Skills 三段）。
+  - 输入框为空时按 `?` 即时切换显示/隐藏，无需再弹出独立 `HelpScreen` 模态；开始输入或切换面板时自动收起。
+  - `?` / `+` 在空输入框（含 `MessageList`、`TopTabBar`、`ChatInput` 三处入口）被拦截为即时快捷键，不再需要回车提交。
+
+### Changed
+- **顶栏标签精简为 Current / Sessions / Skills 三档**：
+  - 移除 `Help` 标签与 `F4` 绑定，帮助信息改为内联 `ShortcutHelp` 面板；`Tab` / `Shift+Tab` 统一用于立即切换上一/下一个顶层面板（含模态视窗内的切换）。
+  - `TopTabBar.cycle_tab(direction)` 支持双向循环，`StatusBar` 新增 `active_tab` 响应式属性，按当前面板动态渲染底部快捷键提示。
+  - 移除各模态视窗中遗留的 `HelpScreen` 导入与跳转分支。
+- **会话删除改为两段式确认**：由单键 `d` / `Delete` 改为 `Ctrl+X` 先进入 armed 状态，再按 `X` 确认；期间任意其它键或 `Esc` 取消，避免误删。
+- **输入框视觉优化**：`#chat-input` 改为左侧 `$primary` 竖线强调并统一 `$surface` 背景（聚焦时不再变暗），`#input-area` 最大高度 14 → 18，为快捷键面板预留空间。
+
+### Fixed
+- 修复 Session 预览与 `ToolCard` 标题中富文本标签未转义导致的 Rich Markup 解析异常（`session.py` / `tool_card.py` 统一 `rich.markup.escape`）。
+- 修复移除 `Help` 标签后相关测试（`test_context` / `test_tui_layout` / `test_session_preview` / `test_yolo_allow_all`）与新交互不一致的回归。
+
 ## [0.1.3.13] - 2026-09-09
 
 ### Added

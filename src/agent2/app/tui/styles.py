@@ -78,6 +78,7 @@ StatusBar {
     overflow-y: auto;
     padding: 0;
     margin: 0;
+    background: $surface;
 }
 
 UserMessage {
@@ -274,7 +275,7 @@ DiffView {
 
 #input-area {
     height: auto;
-    max-height: 14;
+    max-height: 18;
     background: $surface;
     border: none;
     padding: 0;
@@ -295,19 +296,37 @@ DiffView {
     display: block;
 }
 
+#shortcut-help {
+    display: none;
+    height: auto;
+    max-height: 14;
+    overflow-y: auto;
+    margin: 0;
+    padding: 0 1;
+    border: none;
+    background: $surface;
+    color: $text-muted;
+}
+
+#shortcut-help.visible {
+    display: block;
+}
+
 #chat-input {
     height: auto;
     min-height: 2;
     max-height: 12;
     margin: 0;
     border: none;
-    background: $surface-darken-1;
+    border-left: solid $primary;
+    background: $surface;
     padding: 0 1;
 }
 
 #chat-input:focus {
     border: none;
-    background: $panel 60%;
+    border-left: solid $primary;
+    background: $surface;
 }
 
 

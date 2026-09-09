@@ -78,6 +78,8 @@ uv run -m agent2.app.tui --mode ask   # 以 Ask 只读模式启动
 - **Skills**（`/skills`）：浏览、搜索、重载并调用 `SKILL.md` 技能；也可直接使用 `/<skill_name> [prompt]`。
 - **YOLO / Allow-all**（`/yolo`、`/allow-all`）：自动批准所有工具执行；YOLO 模式额外让 LLM 自主决策，无需向用户提问。
 
+> 快捷键：`Tab` / `Shift+Tab` 切换顶层面板 · `?` 切换内联快捷键面板 · `+` 打开会话面板 · `Ctrl+O` 展开/收起工具结果 · `Ctrl+C` 中断 · `Ctrl+D` 保存退出
+
 ## 配置文件 (`~/.config/agent2/config.json`)
 
 Agent2 支持通过用户级配置文件管理服务商凭据与模型别名。文件路径为 `~/.config/agent2/config.json`（可选）：

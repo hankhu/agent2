@@ -34,7 +34,7 @@ def test_welcome_banner_render() -> None:
 
 
 def test_top_tab_bar_cycling() -> None:
-    """Test TopTabBar cycling between current, sessions, skills, and help."""
+    """Test TopTabBar cycling between current, sessions, and skills."""
     tab_bar = TopTabBar()
     assert tab_bar.active_tab == "current"
 
@@ -46,13 +46,14 @@ def test_top_tab_bar_cycling() -> None:
     assert next_tab == "skills"
     assert tab_bar.active_tab == "skills"
 
-    next_tab = tab_bar.cycle_tab(1)
-    assert next_tab == "help"
-    assert tab_bar.active_tab == "help"
-
+    # Wraps back to current; Shift+Tab cycles in reverse.
     next_tab = tab_bar.cycle_tab(1)
     assert next_tab == "current"
     assert tab_bar.active_tab == "current"
+
+    next_tab = tab_bar.cycle_tab(-1)
+    assert next_tab == "skills"
+    assert tab_bar.active_tab == "skills"
 
 
 def test_context_bar_and_status_bar_rendering() -> None:
@@ -92,19 +93,30 @@ async def test_full_app_layout_widgets(tmp_path: Path) -> None:
         # Verify initial active tab
         assert top_bar.active_tab == "current"
 
-        # Tab navigation via cycle_tab triggers sessions dialog check
-        top_bar.cycle_tab()
-        await pilot.pause()
-        # If no saved sessions, dialog gracefully alerts and returns active_tab to "current"
-        assert top_bar.active_tab == "current"
+        # Tab switches the active top-level panel immediately and opens the sessions view
+        from agent2.app.tui.screens.session_select import SessionSelectScreen
 
-        # Now test cycling to help (F4 pushes HelpScreen)
-        await pilot.press("f4")
+        await pilot.press("tab")
         await pilot.pause()
-        assert isinstance(app.screen, HelpScreen)
+        assert isinstance(app.screen, SessionSelectScreen)
+        assert app.screen.query_one(TopTabBar).active_tab == "sessions"
         await pilot.press("escape")
         await pilot.pause()
+        assert app.screen is screen
         assert top_bar.active_tab == "current"
+
+        # '?' toggles the inline shortcut panel instead of a separate modal screen
+        from agent2.app.tui.widgets.shortcut_help import ShortcutHelp
+
+        shortcut = screen.query_one(ShortcutHelp)
+        assert not shortcut.visible
+        screen.query_one("#chat-input").focus()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert shortcut.visible
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert not shortcut.visible
 
 
 @pytest.mark.asyncio
@@ -210,30 +222,32 @@ async def test_completion_enter_accepts() -> None:
 
 
 @pytest.mark.asyncio
-async def test_question_mark_opens_help_and_clears_busy() -> None:
-    """Ensure typing '?' immediately opens HelpScreen and does not leave context bar busy."""
+async def test_question_mark_toggles_shortcut_panel_and_clears_busy() -> None:
+    """Ensure typing '?' immediately toggles the inline shortcut panel and leaves the UI idle."""
+    from agent2.app.tui.widgets.shortcut_help import ShortcutHelp
+
     app = Agent2App(agent=ReActAgent(name="test", llm=DummyLLM()))
     async with app.run_test() as pilot:
         screen = app.screen
         chat_input = screen.query_one("#chat-input")
+        shortcut = screen.query_one(ShortcutHelp)
         cb = screen.query_one(ContextBar)
         sb = screen.query_one(StatusBar)
 
-        # Type '?' and press Enter
+        # '?' is intercepted on an empty input and shows the shortcut panel.
         chat_input.clear()
-        chat_input.insert("?")
-        await pilot.press("enter")
+        await pilot.press("question_mark")
         await pilot.pause()
 
-        # Help modal should be open
-        assert isinstance(app.screen, HelpScreen)
+        assert shortcut.visible
+        assert not isinstance(app.screen, HelpScreen)
         assert not cb.busy
         assert not sb.busy
 
-        # Close help modal
-        await pilot.press("escape")
+        # Pressing '?' again hides the panel.
+        await pilot.press("question_mark")
         await pilot.pause()
-        assert not isinstance(app.screen, HelpScreen)
+        assert not shortcut.visible
         assert not cb.busy
         assert not sb.busy
 

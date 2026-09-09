@@ -65,11 +65,27 @@ class MessageList(ScrollableContainer):
         if (
             event.character
             and event.character.isprintable()
-            and event.key not in ("tab", "enter", "escape", "up", "down", "pageup", "pagedown", "home", "end")
+            and event.key
+            not in ("tab", "shift+tab", "enter", "escape", "up", "down", "pageup", "pagedown", "home", "end")
         ):
             try:
                 chat_input = self.screen.query_one("#chat-input")
                 chat_input.focus()
+                empty = not getattr(chat_input, "text", "").strip()
+                if empty and event.character in ("?", "？"):
+                    action = getattr(self.screen, "action_toggle_shortcuts", None)
+                    if action is not None:
+                        action()
+                        event.prevent_default()
+                        event.stop()
+                        return
+                if empty and event.character in ("+", "＋"):
+                    action = getattr(self.screen, "action_tab_sessions", None)
+                    if action is not None:
+                        action()
+                        event.prevent_default()
+                        event.stop()
+                        return
                 chat_input.insert(event.character)
                 event.prevent_default()
                 event.stop()

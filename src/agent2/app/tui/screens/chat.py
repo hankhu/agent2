@@ -14,7 +14,7 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import OptionList, Static, TextArea
+from textual.widgets import OptionList, TextArea
 from textual.widgets.option_list import Option
 
 from agent2.llm.message import Message as LLMMessage, Role, Usage
@@ -26,7 +26,6 @@ from agent2.app.tui.planner import (
     synthesize_plan_results,
     topological_sort_tasks,
 )
-from agent2.app.tui.screens.help import HelpScreen
 from agent2.app.tui.screens.session_select import SessionSelectScreen
 from agent2.app.tui.widgets.input_area import ChatInput
 from agent2.app.tui.widgets.message_list import (
@@ -38,7 +37,8 @@ from agent2.app.tui.widgets.message_list import (
     RewindRequested,
     UserMessage,
 )
-from agent2.app.tui.widgets.nav_bar import TabItem, TopTabBar
+from agent2.app.tui.widgets.nav_bar import TopTabBar
+from agent2.app.tui.widgets.shortcut_help import ShortcutHelp
 from agent2.app.tui.widgets.status_bar import ContextBar, StatusBar
 from agent2.app.tui.widgets.welcome_banner import WelcomeBanner
 
@@ -139,11 +139,14 @@ class ChatScreen(Screen):
         Binding("ctrl+c", "interrupt", "Interrupt", priority=True),
         Binding("ctrl+o", "toggle_tool_results", "Toggle Results", priority=True),
         Binding("ctrl+d", "quit_app", "Quit", priority=True),
+        Binding("tab", "cycle_tab_next", "Next Tab", priority=True, show=False),
+        Binding("shift+tab", "cycle_tab_prev", "Previous Tab", priority=True, show=False),
         Binding("escape", "cancel_selection", "Cancel Selection", priority=False),
+        Binding("question_mark", "toggle_shortcuts", "Shortcuts", show=False),
+        Binding("plus", "open_sessions_shortcut", "Sessions", show=False),
         Binding("f1", "tab_current", "Current Tab", show=False),
         Binding("f2", "tab_sessions", "Sessions Tab", show=False),
         Binding("f3", "tab_skills", "Skills Tab", show=False),
-        Binding("f4", "tab_help", "Help Tab", show=False),
     ]
 
     def compose(self):  # type: ignore[override]
@@ -152,12 +155,17 @@ class ChatScreen(Screen):
         with Vertical(id="input-area"):
             yield ContextBar(id="context-bar")
             yield OptionList(id="completion-list")
+            yield ShortcutHelp()
             yield ChatInput(id="chat-input")
         yield StatusBar()
 
     def on_mount(self) -> None:
         try:
-            self.query_one("#tab-current", TabItem).focus()
+            self.query_one(StatusBar).active_tab = "current"
+        except Exception:
+            pass
+        try:
+            self.query_one("#tab-current").focus()
         except Exception:
             self.query_one("#chat-input", ChatInput).focus()
         app: Agent2App = self.app  # type: ignore[assignment]
@@ -183,66 +191,102 @@ class ChatScreen(Screen):
 
     # ── Tab Navigation ──────────────────────────────────────────
 
-    def on_chat_input_cycle_tab_requested(self, event: ChatInput.CycleTabRequested) -> None:
+    def _set_active_tab(self, tab_id: str) -> None:
+        """Keep the top tab bar and the bottom shortcut hint in sync."""
         try:
-            self.query_one("#tab-current", TabItem).focus()
+            self.query_one(TopTabBar).active_tab = tab_id
         except Exception:
-            self.query_one(TopTabBar).cycle_tab()
+            pass
+        try:
+            self.query_one(StatusBar).active_tab = tab_id
+        except Exception:
+            pass
+        if tab_id != "current":
+            try:
+                self.query_one(ShortcutHelp).hide_help()
+            except Exception:
+                pass
+            try:
+                self._hide_completion()
+            except Exception:
+                pass
+
+    def on_chat_input_cycle_tab_requested(self, event: ChatInput.CycleTabRequested) -> None:
+        self.action_cycle_tab_next()
+
+    def on_chat_input_shortcuts_requested(self, event: ChatInput.ShortcutsRequested) -> None:
+        self.action_toggle_shortcuts()
+
+    def on_chat_input_sessions_requested(self, event: ChatInput.SessionsRequested) -> None:
+        self.action_tab_sessions()
+
+    def action_cycle_tab_next(self) -> None:
+        """Tab: immediately switch to the next top-level panel."""
+        try:
+            self.query_one(TopTabBar).cycle_tab(1)
+        except Exception:
+            pass
+
+    def action_cycle_tab_prev(self) -> None:
+        """Shift+Tab: immediately switch to the previous top-level panel."""
+        try:
+            self.query_one(TopTabBar).cycle_tab(-1)
+        except Exception:
+            pass
+
+    def action_toggle_shortcuts(self) -> None:
+        """Show or hide the inline shortcut panel above the chat input."""
+        try:
+            shortcut_help = self.query_one(ShortcutHelp)
+            showing = shortcut_help.toggle_help()
+            if showing:
+                self._hide_completion()
+        except Exception:
+            pass
+
+    def action_open_sessions_shortcut(self) -> None:
+        """Immediate ``+`` shortcut for the Sessions panel."""
+        self.action_tab_sessions()
 
     def on_top_tab_bar_tab_selected(self, event: TopTabBar.TabSelected) -> None:
         tab_id = event.tab_id
+        self._set_active_tab(tab_id)
         if tab_id == "current":
-            self.query_one(TopTabBar).active_tab = "current"
             self.query_one("#chat-input", ChatInput).focus()
         elif tab_id == "sessions":
             self._open_sessions_dialog()
         elif tab_id == "skills":
             self._open_skills_dialog()
-        elif tab_id == "help":
-            self._open_help_dialog()
 
     def action_tab_current(self) -> None:
-        self.query_one(TopTabBar).active_tab = "current"
+        self._set_active_tab("current")
         self.query_one("#chat-input", ChatInput).focus()
 
     def action_tab_sessions(self) -> None:
-        self.query_one(TopTabBar).active_tab = "sessions"
+        self._set_active_tab("sessions")
         self._open_sessions_dialog()
 
     def action_tab_skills(self) -> None:
-        self.query_one(TopTabBar).active_tab = "skills"
+        self._set_active_tab("skills")
         self._open_skills_dialog()
 
-    def action_tab_help(self) -> None:
-        self.query_one(TopTabBar).active_tab = "help"
-        self._open_help_dialog()
-
-    def _open_help_dialog(self) -> None:
-        def on_dismiss(_: Any) -> None:
-            self.query_one(TopTabBar).active_tab = "current"
-            self.query_one("#chat-input", ChatInput).focus()
-
-        self.app.push_screen(HelpScreen(), callback=on_dismiss)
-
     def _open_sessions_dialog(self) -> None:
+        self._set_active_tab("sessions")
         app: Agent2App = self.app  # type: ignore[assignment]
         messages = self.query_one("#messages", MessageList)
         try:
             sessions = app.session_manager.list_sessions()
         except Exception as exc:
             messages.add_system_message(f"❌ Failed to list sessions: {exc}")
-            self.query_one(TopTabBar).active_tab = "current"
+            self._set_active_tab("current")
             self.query_one("#chat-input", ChatInput).focus()
             return
 
         if not sessions:
             messages.add_system_message("No saved sessions.")
-            self.query_one(TopTabBar).active_tab = "current"
-            self.query_one("#chat-input", ChatInput).focus()
-            return
 
         def on_session(session_id: str | None) -> None:
-            self.query_one(TopTabBar).active_tab = "current"
+            self._set_active_tab("current")
             self.query_one("#chat-input", ChatInput).focus()
             if not session_id:
                 return
@@ -268,25 +312,14 @@ class ChatScreen(Screen):
         from agent2.app.tui.screens.skill_select import SkillSelectScreen
         from agent2.context import discover_skills
 
+        self._set_active_tab("skills")
         app: Agent2App = self.app  # type: ignore[assignment]
-        messages = self.query_one("#messages", MessageList)
-
         skills = discover_skills()
         if getattr(app, "context", None):
             app.context.skills = skills
 
-        if not skills:
-            messages.add_system_message(
-                "No skills found.\n"
-                "[dim]Place skills in ~/.agent2/skills/<name>/SKILL.md, "
-                "~/.claude/skills/<name>/SKILL.md, or .agent2/skills/<name>/SKILL.md.[/dim]"
-            )
-            self.query_one(TopTabBar).active_tab = "current"
-            self.query_one("#chat-input", ChatInput).focus()
-            return
-
         def on_skill(skill_name: str | None) -> None:
-            self.query_one(TopTabBar).active_tab = "current"
+            self._set_active_tab("current")
             chat_input = self.query_one("#chat-input", ChatInput)
             chat_input.focus()
             if skill_name:
@@ -341,11 +374,11 @@ class ChatScreen(Screen):
 
         # Shortcuts corresponding to bottom bar hints
         if text in ("?", "？", "help"):
-            self._open_help_dialog()
+            self.action_toggle_shortcuts()
             return
 
-        if text == "+":
-            self._open_sessions_dialog()
+        if text in ("+", "＋"):
+            self.action_tab_sessions()
             return
 
         if text.startswith("/"):
@@ -387,6 +420,13 @@ class ChatScreen(Screen):
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         """Show / update / hide the completion list as the user types."""
         text = event.text_area.text
+        if text:
+            try:
+                shortcut_help = self.query_one(ShortcutHelp)
+                if shortcut_help.visible:
+                    shortcut_help.hide_help()
+            except Exception:
+                pass
         # Show completions only when text starts with / and has no space yet
         if text.startswith("/") and " " not in text:
             prefix = text.lower()
@@ -1136,7 +1176,15 @@ class ChatScreen(Screen):
     # ── Interrupt / Quit / Selection ────────────────────────────
 
     def action_cancel_selection(self) -> None:
-        """Escape: clear message selection and return focus to chat input."""
+        """Escape: close the shortcut panel, clear selection, and focus the input."""
+        try:
+            shortcut_help = self.query_one(ShortcutHelp)
+            if shortcut_help.visible:
+                shortcut_help.hide_help()
+                self.query_one("#chat-input", ChatInput).focus()
+                return
+        except Exception:
+            pass
         messages = self.query_one("#messages", MessageList)
         messages.deselect_all()
         self.query_one("#chat-input", ChatInput).focus()

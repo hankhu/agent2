@@ -312,3 +312,34 @@
   - `src/agent2/app/tui/app.py`、`src/agent2/app/tui/screens/chat.py`、`src/agent2/app/tui/session.py`
   - `src/agent2/app/tui/screens/skill_select.py`、`session_select.py`、`widgets/confirm_modal.py`、`tool_card.py`
   - `tests/test_context.py` 等新增测试文件
+
+
+## 16. 内联快捷键面板、Tab 即时切面板与两段式会话删除 (v0.1.3.14)
+
+- **内联快捷键面板**（`src/agent2/app/tui/widgets/shortcut_help.py`）：
+  - 新增 `ShortcutHelp(Static)`：`display: none` + `.visible` 类切换，`max-height: 14` 可滚动，常驻于 `#input-area` 中、`ChatInput` 之上。
+  - `SHORTCUT_HELP_TEXT` 分为 `Keyboard shortcuts` / `Sessions panel` / `Skills panel` 三段，纯文本 + Rich Markup 上色。
+  - `show_help()` / `hide_help()` / `toggle_help()` 返回当前可见状态；`ChatScreen.action_toggle_shortcuts()` 负责切换并在展开时收起斜杠补全。
+
+- **`?` / `+` 即时快捷键（无需回车）**：
+  - `ChatInput.on_key` 在空输入框且非补全态下拦截 `question_mark` / `?` / `？` 与 `plus` / `+` / `＋`，分别 post `ShortcutsRequested` / `SessionsRequested` 消息。
+  - `MessageList` 与 `TopTabBar.TabItem` 的 type-to-focus 分支同样在空输入时识别 `?` / `+`，直接调用 `screen.action_toggle_shortcuts()` / `action_tab_sessions()`，避免先把字符插入输入框再提交。
+  - 保留 `on_chat_input_submitted` 对 `?` / `help` / `+` 的兼容处理。
+
+- **顶栏精简与 Tab 即时切面板**：
+  - `TopTabBar.TABS` 由 `current` / `sessions` / `skills` / `help` 精简为前三档，移除 `F4` 与 `action_tab_help` / `_open_help_dialog`，各模态视窗同步删除 `HelpScreen` 跳转分支。
+  - `ChatInput` 将 `Tab` 完全让渡给切面板（`CycleTabRequested`），补全导航只保留 `↑` / `↓` / `Esc`；`TabItem` 监听 `tab` / `shift+tab` 调用 `TopTabBar.cycle_tab(±1)`。
+  - `TopTabBar.cycle_tab(direction)` 支持双向循环；`StatusBar` 新增 `active_tab` 响应式属性，按 `sessions` / `skills` / 其它动态渲染底部提示行。
+
+- **两段式会话删除**（`screens/session_select.py`）：
+  - 移除单键 `d` / `Delete` 直接删除，改为 `Ctrl+X` 触发 `DeleteArmRequested` 进入 armed 态，再按 `x` / `X` / `Shift+X` 触发 `DeleteRequested`。
+  - armed 期间任意其它按键或 `Esc` 取消（`_clear_delete_armed()`），底部提示实时切换为红色确认提示。
+  - `action_delete_session()` / `action_cancel_or_close()` 均先清理 armed 状态，切换顶栏标签时也一并复位。
+
+- **视觉与转义修复**：
+  - `styles.py`：`#chat-input` 增加 `border-left: solid $primary` 并以 `$surface` 统一背景（聚焦不再变暗）；`#input-area` 最大高度 14 → 18；`#shortcut-help` 新增样式。
+  - `session.py` / `tool_card.py`：预览与标题统一 `rich.markup.escape`，修复含方括号内容被当作样式标签吞掉的问题。
+
+- **测试**：
+  - 更新 `tests/test_context.py`、`test_tui_layout.py`、`test_session_preview.py`、`test_yolo_allow_all.py` 以匹配三档顶栏、`?` 面板与两段式删除。
+  - 全量 166 项测试全部通过。

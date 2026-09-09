@@ -17,7 +17,9 @@ HELP_MARKDOWN = """
 ### ⌨️ Keyboard Shortcuts
 - **Enter**: Send message
 - **Shift+Enter**: Insert newline in input
-- **Tab**: Accept command completion / Cycle top tabs when input is empty
+- **Tab / Shift+Tab**: Switch to the next / previous top-level panel
+- **?**: Toggle the inline shortcut panel above the chat input
+- **+**: Open the Sessions panel immediately
 - **Ctrl+C**: Interrupt agent generation or tool execution
 - **Ctrl+O**: Toggle tool execution results expand/collapse
 - **Ctrl+D**: Save session and exit

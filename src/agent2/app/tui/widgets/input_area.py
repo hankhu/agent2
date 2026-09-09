@@ -1,8 +1,9 @@
 """Multi-line chat input with Enter-to-submit / Shift+Enter-for-newline.
 
 Also supports completion navigation: when ``show_completion`` is ``True``,
-Tab / Up / Down / Escape are forwarded to the parent screen via
+Up / Down / Escape are forwarded to the parent screen via
 :class:`CompletionKey` messages instead of being handled by the TextArea.
+The Tab key is reserved for switching top tabs.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ class ChatInput(TextArea):
 
     * **Enter** submits the current text.
     * **Shift+Enter** inserts a newline.
+    * **Tab** switches top tabs immediately.
     * Pasting multi-line text does *not* trigger a submit.
     * When :attr:`show_completion` is ``True``, navigation keys are
       forwarded via :class:`CompletionKey` messages.
@@ -40,7 +42,13 @@ class ChatInput(TextArea):
             self.key = key
 
     class CycleTabRequested(Message):
-        """Posted when user presses Tab while input is empty to cycle tabs."""
+        """Posted when user presses Tab to cycle the top tabs."""
+
+    class ShortcutsRequested(Message):
+        """Posted when the user presses ``?`` on an empty input."""
+
+    class SessionsRequested(Message):
+        """Posted when the user presses ``+`` on an empty input."""
 
     def __init__(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(
@@ -70,15 +78,33 @@ class ChatInput(TextArea):
                 event.stop()
                 return
 
-        # ── Tab on empty input: cycle top tabs ─────────────────
-        if not self.show_completion and not self.text.strip() and event.key == "tab":
+        # ── Current-tab shortcuts: immediate, no Enter required ─
+        empty = not self.text.strip()
+        if not self.show_completion and empty and (
+            event.key == "question_mark" or event.character in ("?", "？")
+        ):
+            self.post_message(self.ShortcutsRequested())
+            event.prevent_default()
+            event.stop()
+            return
+
+        if not self.show_completion and empty and (
+            event.key == "plus" or event.character in ("+", "＋")
+        ):
+            self.post_message(self.SessionsRequested())
+            event.prevent_default()
+            event.stop()
+            return
+
+        # ── Tab is reserved exclusively for switching top tabs ──
+        if event.key == "tab":
             self.post_message(self.CycleTabRequested())
             event.prevent_default()
             event.stop()
             return
 
         # ── Completion navigation ───────────────────────────────
-        if self.show_completion and event.key in ("tab", "up", "down", "escape"):
+        if self.show_completion and event.key in ("up", "down", "escape"):
             if event.key in ("up", "down"):
                 self._completion_navigated = True
             self.post_message(self.CompletionKey(event.key))

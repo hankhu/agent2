@@ -109,8 +109,12 @@ async def test_session_select_screen_preview_and_delete(tmp_path: Path) -> None:
         await pilot.pause()
         assert "DB Optimization" in preview_w.content or "First conversation" in preview_w.content
 
-        # Press 'd' to delete highlighted session
-        await pilot.press("d")
+        # Delete requires the two-key sequence Ctrl+X, then X
+        await pilot.press("ctrl+x")
+        await pilot.pause()
+        # A single X before arming should NOT delete
+        assert len(sm.list_sessions()) == 2
+        await pilot.press("x")
         await pilot.pause()
 
         # Verify sess_1 was deleted

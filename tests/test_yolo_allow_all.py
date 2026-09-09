@@ -198,40 +198,57 @@ async def test_tab_navigation_across_top_buttons_and_panels(tmp_path: Path):
     app = Agent2App(agent=agent, session_manager=empty_sm)
 
     async with app.run_test(size=(100, 30)) as pilot:
+        from agent2.app.tui.screens.session_select import SessionSelectScreen
+        from agent2.app.tui.screens.skill_select import SkillSelectScreen
+
         screen = app.screen
         top_bar = screen.query_one(TopTabBar)
         tab_current = screen.query_one("#tab-current", TabItem)
-        tab_sessions = screen.query_one("#tab-sessions", TabItem)
-        messages = screen.query_one("#messages", MessageList)
         chat_input = screen.query_one("#chat-input", ChatInput)
 
         # 1. On open, focus is on the first top button: tab-current
         assert app.focused == tab_current
         assert top_bar.active_tab == "current"
 
-        # 2. Press Tab: switches to tab-sessions
+        # 2. Press Tab: switches the active panel to Sessions immediately
         await pilot.press("tab")
         await pilot.pause()
-        assert app.focused == tab_sessions
-        assert top_bar.active_tab == "sessions"
+        assert isinstance(app.screen, SessionSelectScreen)
+        assert app.screen.query_one(TopTabBar).active_tab == "sessions"
 
-        # 3. When on sessions, press Tab again: switches to next panel (messages)
+        # 3. Press Tab again: advances to the Skills panel
         await pilot.press("tab")
         await pilot.pause()
-        assert app.focused == messages
+        assert isinstance(app.screen, SkillSelectScreen)
+        assert app.screen.query_one(TopTabBar).active_tab == "skills"
 
-        # 4. Press Tab on messages: switches to next panel (chat-input)
+        # 4. Press Tab again: wraps back to the Current panel
         await pilot.press("tab")
         await pilot.pause()
-        assert app.focused == chat_input
-
-        # 5. Press Tab on empty chat-input: wraps back to top buttons (tab-current)
-        await pilot.press("tab")
-        await pilot.pause()
-        assert app.focused == tab_current
+        assert app.screen is screen
         assert top_bar.active_tab == "current"
 
-        # 6. Type-to-focus: typing a printable character while on tab-current redirects to chat-input
+        # 5. Shift+Tab cycles backwards to the Skills panel
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert isinstance(app.screen, SkillSelectScreen)
+        assert app.screen.query_one(TopTabBar).active_tab == "skills"
+
+        # 6. Shift+Tab again: back to the Sessions panel
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert isinstance(app.screen, SessionSelectScreen)
+        assert app.screen.query_one(TopTabBar).active_tab == "sessions"
+
+        # 7. Esc closes the modal and returns to the Current panel
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen is screen
+        assert top_bar.active_tab == "current"
+
+        # 8. Type-to-focus: typing a printable character while on tab-current redirects to chat-input
+        tab_current.focus()
+        await pilot.pause()
         await pilot.press("h")
         await pilot.pause()
         assert app.focused == chat_input

@@ -11,6 +11,7 @@ from agent2.app.tui.widgets.message_list import (
     UserMessage,
 )
 from agent2.app.tui.widgets.nav_bar import TabItem, TopTabBar
+from agent2.app.tui.widgets.shortcut_help import ShortcutHelp
 from agent2.app.tui.widgets.status_bar import ContextBar, FooterBar, StatusBar
 from agent2.app.tui.widgets.tool_card import ToolCard
 from agent2.app.tui.widgets.welcome_banner import WelcomeBanner
@@ -24,6 +25,7 @@ __all__ = [
     "DiffView",
     "FooterBar",
     "MessageList",
+    "ShortcutHelp",
     "StatusBar",
     "SystemMessage",
     "TabItem",

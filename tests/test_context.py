@@ -270,5 +270,5 @@ def test_top_tab_bar_has_skills_tab():
     from agent2.app.tui.widgets.nav_bar import TopTabBar
 
     tab_ids = [t[0] for t in TopTabBar.TABS]
-    assert tab_ids == ["current", "sessions", "skills", "help"]
+    assert tab_ids == ["current", "sessions", "skills"]
 

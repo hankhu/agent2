@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+from rich.markup import escape
+
 
 SESSION_DIR = Path.home() / ".local" / "share" / "agent2" / "sessions"
 LOG_DIR = Path.home() / ".local" / "share" / "agent2" / "logs"
@@ -311,8 +313,8 @@ class SessionManager:
         )
 
         lines = [
-            f"[bold cyan]{title}[/bold cyan]",
-            f"[dim]ID: {session_id}  ·  Saved: {time_str}  ·  {len(messages)} messages[/dim]",
+            f"[bold cyan]{escape(str(title))}[/bold cyan]",
+            f"[dim]ID: {escape(str(session_id))}  ·  Saved: {time_str}  ·  {len(messages)} messages[/dim]",
             "[dim]" + "─" * 40 + "[/dim]",
             "",
         ]
@@ -326,25 +328,25 @@ class SessionManager:
             role = (m.get("role") or "").lower()
             content = (m.get("content") or "").strip()
             if role == "user":
-                snippet = _clean_msg_text(content, 200)
+                snippet = escape(_clean_msg_text(content, 200))
                 lines.append(f"[bold dodger_blue1]👤 User:[/bold dodger_blue1]\n{snippet}\n")
             elif role == "assistant":
                 if content:
-                    snippet = _clean_msg_text(content, 200)
+                    snippet = escape(_clean_msg_text(content, 200))
                     lines.append(f"[bold green]🤖 Assistant:[/bold green]\n{snippet}\n")
                 tool_calls = m.get("tool_calls", [])
                 for tc in tool_calls:
-                    tc_name = tc.get("name", "tool")
+                    tc_name = escape(str(tc.get("name", "tool")))
                     args = tc.get("arguments", {})
                     args_str = " ".join(f"{k}={repr(v)}" for k, v in args.items())
                     if len(args_str) > 60:
                         args_str = args_str[:57] + "…"
-                    lines.append(f"[dim yellow]⚙ {tc_name} {args_str}[/dim yellow]\n")
+                    lines.append(f"[dim yellow]⚙ {tc_name} {escape(args_str)}[/dim yellow]\n")
             elif role == "tool":
                 tr = m.get("tool_result", {})
                 tr_content = (tr.get("content") or "").strip()
                 if tr_content:
-                    snippet = _clean_msg_text(tr_content, 100)
+                    snippet = escape(_clean_msg_text(tr_content, 100))
                     lines.append(f"[dim]  ↳ output: {snippet}[/dim]\n")
 
         if len(messages) > max_messages:

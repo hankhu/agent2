@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from textual import events
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -13,7 +11,6 @@ from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from agent2.app.chat import get_available_models, resolve_provider_or_host
-from agent2.app.tui.screens.help import HelpScreen
 from agent2.app.tui.widgets.nav_bar import TopTabBar
 
 
@@ -123,6 +120,8 @@ class ModelSelectScreen(ModalScreen[str]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel", priority=True),
+        Binding("tab", "cycle_tab_next", "Next Tab", priority=True, show=False),
+        Binding("shift+tab", "cycle_tab_prev", "Previous Tab", priority=True, show=False),
         Binding("up", "nav_up", "Up", show=False),
         Binding("down", "nav_down", "Down", show=False),
     ]
@@ -147,7 +146,7 @@ class ModelSelectScreen(ModalScreen[str]):
             yield OptionList(id="model-list")
             yield ModelSearchInput(placeholder="❯ Search models...", id="model-input")
             yield Static(
-                "[dim]↑/↓ to navigate  ·  enter to select  ·  esc to cancel[/dim]",
+                "[dim]↑/↓ select  ·  enter choose  ·  tab next  ·  esc cancel[/dim]",
                 id="model-hint",
             )
 
@@ -186,15 +185,24 @@ class ModelSelectScreen(ModalScreen[str]):
 
         opt_list.highlighted = 0
 
+    def action_cycle_tab_next(self) -> None:
+        self.query_one(TopTabBar).cycle_tab(1)
+
+    def action_cycle_tab_prev(self) -> None:
+        self.query_one(TopTabBar).cycle_tab(-1)
+
     def on_top_tab_bar_tab_selected(self, event: TopTabBar.TabSelected) -> None:
         if event.tab_id == "current":
             self.dismiss("")
-        elif event.tab_id == "skills":
-            from agent2.app.tui.screens.skill_select import SkillSelectScreen
+        elif event.tab_id in ("sessions", "skills"):
+            chat = self.app.screen_stack[-2] if len(self.app.screen_stack) >= 2 else None
             self.dismiss("")
-            self.app.push_screen(SkillSelectScreen())
-        elif event.tab_id == "help":
-            self.app.push_screen(HelpScreen())
+            opener_name = (
+                "_open_sessions_dialog" if event.tab_id == "sessions" else "_open_skills_dialog"
+            )
+            opener = getattr(chat, opener_name, None)
+            if opener is not None:
+                opener()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._populate_options(event.value)

@@ -1,4 +1,4 @@
-"""Top navigation tab bar widget — Current, Sessions, and Help tabs."""
+"""Top navigation tab bar widget — Current, Sessions, and Skills tabs."""
 
 from __future__ import annotations
 
@@ -28,16 +28,18 @@ class TabItem(Static):
             parent.active_tab = self.tab_id
 
     def on_key(self, event: events.Key) -> None:
-        if event.key == "tab" and self.tab_id == "sessions":
-            try:
-                messages = self.screen.query_one("#messages")
-                messages.focus()
-                event.prevent_default()
-                event.stop()
-                return
-            except Exception:
-                pass
-        elif event.key in ("enter", "space"):
+        parent = self.parent
+        if event.key == "tab" and isinstance(parent, TopTabBar):
+            parent.cycle_tab()
+            event.prevent_default()
+            event.stop()
+            return
+        if event.key == "shift+tab" and isinstance(parent, TopTabBar):
+            parent.cycle_tab(-1)
+            event.prevent_default()
+            event.stop()
+            return
+        if event.key in ("enter", "space"):
             try:
                 chat_input = self.screen.query_one("#chat-input")
                 if self.tab_id == "current" and getattr(chat_input, "text", "").strip():
@@ -53,10 +55,30 @@ class TabItem(Static):
             self.post_message(TopTabBar.TabSelected(self.tab_id))
             event.prevent_default()
             event.stop()
-        elif event.character and event.character.isprintable() and event.key not in ("tab", "enter", "escape"):
+            return
+        if (
+            event.character
+            and event.character.isprintable()
+            and event.key not in ("tab", "shift+tab", "enter", "escape")
+        ):
             try:
                 chat_input = self.screen.query_one("#chat-input")
                 chat_input.focus()
+                empty = not getattr(chat_input, "text", "").strip()
+                if empty and event.character in ("?", "？"):
+                    action = getattr(self.screen, "action_toggle_shortcuts", None)
+                    if action is not None:
+                        action()
+                        event.prevent_default()
+                        event.stop()
+                        return
+                if empty and event.character in ("+", "＋"):
+                    action = getattr(self.screen, "action_tab_sessions", None)
+                    if action is not None:
+                        action()
+                        event.prevent_default()
+                        event.stop()
+                        return
                 chat_input.insert(event.character)
                 event.prevent_default()
                 event.stop()
@@ -65,7 +87,7 @@ class TabItem(Static):
 
 
 class TopTabBar(Widget):
-    """Top navigation bar showing Current and Sessions tabs."""
+    """Top navigation bar showing Current, Sessions, and Skills tabs."""
 
     DEFAULT_CSS = """
     TopTabBar {
@@ -104,7 +126,6 @@ class TopTabBar(Widget):
         ("current", "Current"),
         ("sessions", "Sessions"),
         ("skills", "Skills"),
-        ("help", "Help"),
     ]
 
     active_tab: reactive[str] = reactive("current")

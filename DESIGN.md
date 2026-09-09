@@ -331,7 +331,7 @@ synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
 ### 4.8 极简 Copilot CLI 风格 TUI 视窗与模型/Host 智能解析
 
 - **现代极简多视窗体系**：
-  - **顶部标签栏 (`TopTabBar`)**：`Current`、`Sessions`、`Skills`、`Help` 紧凑水平并排排列，支持鼠标交互、快捷键（`F1`–`F4`）以及输入框空白时按 `Tab` 循环切换。
+  - **顶部标签栏 (`TopTabBar`)**：`Current`、`Sessions`、`Skills` 紧凑水平并排排列，支持鼠标交互、快捷键（`F1`–`F3`）以及 `Tab` / `Shift+Tab` 即时循环切换上一/下一个面板。
   - **全屏模态选择系统**：`SessionSelectScreen`、`SkillSelectScreen` 与 `ModelSelectScreen` 统一对齐 Copilot CLI 风格，具备顶栏状态联动、Tip 引导条目、全屏饱和亮蓝高光选条（`#1f6feb`）以及实时多维关键词过滤。
 - **智能提供商解析与 Host 优雅降级**：
   - `resolve_provider_or_host(provider, base_url)` 建立自底向上的提供商识别链路：
@@ -349,6 +349,15 @@ synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
 - **模型切换保留**：`Agent2App.switch_model()` 在创建新 LLM 实例后回填 `total_usage` / `last_usage`。
 - **Plan 子任务聚合**：`_run_plan_execution()` 为每个 subtask 创建独立 sub-agent，并在 `finally` 中将 `subagent.llm.total_usage` 累加到父会话，失败或取消的子任务也已消耗的 Token 同样计入。
 - **实时同步**：`on_thought_received()`、`on_tool_call_completed()` 及三个 worker 的 `finally` 均调用 `_sync_status_bar()`，保证长任务期间与异常路径下 `ContextBar` 的 Token 计数不归零。
+
+---
+
+### 4.10 内联快捷键面板与统一面板导航 (Inline Shortcut Help & Panel Navigation)
+
+- **内联帮助取代独立模态**：帮助信息由独立 `HelpScreen` 模态迁移为常驻 `ShortcutHelp` 内联面板（`widgets/shortcut_help.py`），紧贴输入框上方渲染；空输入时 `?` 即时切换显隐，开始输入或切换面板时自动收起。
+- **统一的面板切换语义**：顶栏精简为 `Current` / `Sessions` / `Skills` 三档，`Tab` / `Shift+Tab` 在输入框、消息区与顶栏标签间统一映射为「立即切换上一/下一个顶层面板」，`TopTabBar.cycle_tab(direction)` 双向循环并广播 `TabSelected`。
+- **状态同步单一来源**：`StatusBar.active_tab` 响应式属性作为当前面板的唯一真源，底部提示行据此渲染 Chat / Sessions / Skills 三套按键提示，避免多组件状态不一致。
+- **两段式破坏性操作确认**：会话删除采用 `Ctrl+X`（armed）→ `X`（confirm）两段式交互，armed 期间任意其它键或 `Esc` 取消，降低误删风险。
 
 ---
 

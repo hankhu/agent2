@@ -542,6 +542,17 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 
 ---
 
+### 6.24 内联快捷键面板、Tab 即时切面板与两段式删除 (`shortcut_help.py` / `input_area.py` / `nav_bar.py` / `status_bar.py` / `session_select.py`)
+
+- **内联快捷键面板**：`ShortcutHelp(Static)` 默认 `display: none`，通过 `.visible` 类切换；`toggle_help()` 返回当前可见状态供调用方联动收起补全。
+- **空输入即时快捷键**：`ChatInput.on_key` 在 `not show_completion and not text.strip()` 时拦截 `?` / `？` / `+` / `＋`，分别 post `ShortcutsRequested` / `SessionsRequested`；`MessageList` / `TopTabBar.TabItem` 的 type-to-focus 分支做同样判断并直接调用 `screen` 的 action，避免字符先入输入框。
+- **Tab 专用于切面板**：`ChatInput` 的 `tab` 一律 post `CycleTabRequested`（不再用于补全接受）；补全导航仅保留 `↑` / `↓` / `Esc`。`TabItem` 拦截 `tab` / `shift+tab` 调用 `TopTabBar.cycle_tab(±1)`。
+- **动态底部提示**：`StatusBar.active_tab` 响应式属性；`render()` 依据 `sessions` / `skills` / 其它分支渲染不同的按键提示行。
+- **两段式删除**：`SessionSearchInput` 将 `ctrl+x` 映射为 `DeleteArmRequested`，armed 态下 `x` / `X` / `shift+x` 映射为 `DeleteRequested`；`SessionSelectScreen._delete_armed` 控制 armed 状态并实时更新 `#session-hint` 文案。
+- **Rich Markup 转义**：`session.py` 预览与 `tool_card.py` 标题统一使用 `rich.markup.escape`，防止用户内容中的方括号破坏样式解析。
+
+---
+
 ## 7. 异步设计
 
 - **全链路 async/await**：从 `agent.chat()` → `_run_loop()` → `llm.chat()` → `tool.execute()` 全部异步。

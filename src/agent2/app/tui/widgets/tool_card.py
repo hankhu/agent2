@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rich.markup import escape
 from rich.table import Table
 from textual import events
 from textual.app import ComposeResult
@@ -108,9 +109,10 @@ class ToolCard(Vertical):
         args_display = ", ".join(
             f"{k}={_truncate(repr(v), 80)}" for k, v in self._arguments.items()
         )
+        tool_name = escape(self._tool_name)
         if args_display:
-            return f"[bold yellow]⚙ {self._tool_name}[/bold yellow]  [dim]{args_display}[/dim]"
-        return f"[bold yellow]⚙ {self._tool_name}[/bold yellow]"
+            return f"[bold yellow]⚙ {tool_name}[/bold yellow]  [dim]{escape(args_display)}[/dim]"
+        return f"[bold yellow]⚙ {tool_name}[/bold yellow]"
 
     def _get_result_title(self) -> str:
         """Extract a descriptive result title showing the command's first line (backwards compatibility)."""
@@ -145,7 +147,7 @@ class ToolCard(Vertical):
         if len(display) > 500:
             display = display[:500] + "\n… (truncated)"
         yield ToolCollapsible(
-            Static(display, id="result-content"),
+            Static(display, id="result-content", markup=False),
             title=self._get_operation_text(),
             collapsed=True,
             running=self._initial_result is None,
