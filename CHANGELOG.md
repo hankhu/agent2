@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.3.16] - 2026-09-10
+
+### Fixed
+- **MCP stdio 连接资源泄漏修复**：`MCPManager._connect_stdio` 中 transport context 打开后若 session 初始化失败，现在会正确调用 `__aexit__` 清理 transport 资源，防止泄漏。
+- **配置加载异常收窄**：`BaseAgent.__init__` 中 `max_iterations` 加载从 `except Exception` 收窄为 `except (KeyError, ValueError, FileNotFoundError, ImportError)`，并在回退时输出 `log.warning`，避免掩盖真实错误。
+- **流式请求 token 用量估算回退**：`OpenAILLM.chat_stream` 新增 `stream_options={"include_usage": True}` 请求参数；当 provider 不返回 usage 数据时，按 `len(content) // 4` 估算 token 数，保证 `total_usage` 不为零。
+- **Planner JSON 回退过滤**：`PlannerAgent._generate_plan` 的 newline 回退现在过滤 `len ≤ 3` 的垃圾行，避免纯编号或空串变成计划步骤。
+- **模型名上下文窗口匹配改为精确前缀**：`guess_context_window` 从 `if prefix in m` 改为 `if m.startswith(prefix)`，防止未来模型名子串误匹配。
+- **`rewind()` docstring 补充截断行为说明**：明确当请求轮数超过历史时静默截断的行为。
+
+### Changed
+- **PRD 未实现功能标注状态**：`agent_tui_reqs.md` 中 `/thinking`、`/compact`、`/undo` 三条未实现的斜杠命令标注为 **(Planned)**。
+- **README 快捷键补充 `Ctrl+Z`**：快捷键说明行新增 `Ctrl+Z 挂起至后台`。
+
 ## [0.1.3.15] - 2026-09-10
 
 ### Added

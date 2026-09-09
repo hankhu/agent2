@@ -146,18 +146,22 @@ class OpenAILLM(BaseLLM):
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "stream": True,
+            "stream_options": {"include_usage": True},
             **kwargs,
         }
 
         if tools:
             req["tools"] = [self._to_oai_tool(t) for t in tools]
 
+        collected_content: list[str] = []
+        usage_received = False
         stream = await client.chat.completions.create(**req)
         async for chunk in stream:
             # Providers that honor stream_options={"include_usage": True} attach
             # usage to the final chunk; capture it when present so last_usage /
             # total_usage stay live for streamed requests too.
             if chunk.usage is not None:
+                usage_received = True
                 self._record_usage(
                     Usage(
                         prompt_tokens=chunk.usage.prompt_tokens or 0,
@@ -166,7 +170,22 @@ class OpenAILLM(BaseLLM):
                     )
                 )
             if chunk.choices and chunk.choices[0].delta.content:
+                collected_content.append(chunk.choices[0].delta.content)
                 yield chunk.choices[0].delta.content
+
+        # Fallback: estimate usage when the provider didn't report it.
+        if not usage_received:
+            est_completion = sum(len(c) for c in collected_content) // 4 or 1
+            est_prompt = sum(
+                len(m.content or "") for m in messages
+            ) // 4 or 1
+            self._record_usage(
+                Usage(
+                    prompt_tokens=est_prompt,
+                    completion_tokens=est_completion,
+                    total_tokens=est_prompt + est_completion,
+                )
+            )
 
     # ── Format conversion ───────────────────────────────────────────
 

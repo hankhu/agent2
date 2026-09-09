@@ -366,3 +366,30 @@
   - `tests/test_session_preview.py`：新增 `test_session_delete_preserves_highlight_index`，覆盖三会话中删除中间项后的高亮索引保持验证。
   - `tests/test_tui_layout.py`：新增 `test_chat_input_history_supports_slash_commands` 与 `test_agent2_app_ctrl_z_suspend`。
   - 全量 169 项自动化测试全部通过。
+
+## 26. 代码审查修复与文档勘误 (v0.1.3.16)
+
+- **MCP 资源泄漏修复**（`mcp.py`）：
+  - `_connect_stdio` 中手动管理的 `transport_ctx.__aenter__()` / `session_ctx.__aenter__()` 被 `try...except BaseException` 包裹；若 session 初始化失败，`except` 分支显式调用 `transport_ctx.__aexit__(None, None, None)` 释放已打开的 transport，然后 re-raise。修复了 transport 永不关闭的潜在泄漏路径。
+
+- **配置加载异常收窄**（`agent/base.py`）：
+  - `BaseAgent.__init__` 加载 `max_iterations` 时的 `except Exception` 改为 `except (KeyError, ValueError, FileNotFoundError, ImportError)`，并通过 `_logging.getLogger(__name__).warning(...)` 记录回退原因，便于排查配置问题。
+
+- **流式 token 用量估算**（`llm/openai.py`）：
+  - `chat_stream` 请求参数新增 `"stream_options": {"include_usage": True}`，显式要求 provider 在最终 chunk 附带 usage。
+  - 流结束后检查 `usage_received` 标志，若 provider 未返回 usage（如部分本地 LLM），按 `len(content) // 4` 估算 prompt/completion tokens 并调用 `_record_usage`，保证 `total_usage` 始终有值。
+
+- **Planner JSON 回退校验**（`agent/planner.py`）：
+  - `_generate_plan` 的 newline 回退增加 `len(ln) > 3` 过滤，丢弃纯编号（如 `1.`）和空白行，避免无效步骤进入执行流水线。
+
+- **模型名前缀精确匹配**（`llm/base.py`）：
+  - `guess_context_window` 的匹配条件从 `if prefix in m`（子串匹配）改为 `if m.startswith(prefix)`（前缀匹配），消除未来新增模型名时的误匹配风险。
+
+- **`rewind()` docstring 补充**（`agent/base.py`）：
+  - 明确记录"当请求轮数超过可用 user 消息数时，所有可用轮均被移除（静默截断）"的行为。
+
+- **文档勘误**：
+  - `agent_tui_reqs.md`：为三条未实现的功能 `/thinking`（FR-MOD-02）、`/compact`（FR-SES-04）、`/undo`（FR-DIF-02）标注 **(Planned)** 状态。
+  - `README.md`：快捷键行补充 `Ctrl+Z 挂起至后台`。
+
+- **测试**：全量 169 项自动化测试全部通过。

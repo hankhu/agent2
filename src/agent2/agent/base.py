@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging as _logging
+
 import copy
 import os
 from abc import ABC, abstractmethod
@@ -60,7 +62,10 @@ class BaseAgent(ABC):
                 from agent2.app.config import load_config
 
                 self.max_iterations = load_config().max_iterations
-            except Exception:
+            except (KeyError, ValueError, FileNotFoundError, ImportError) as exc:
+                _logging.getLogger(__name__).warning(
+                    "Failed to load max_iterations from config (%s), using default", exc
+                )
                 self.max_iterations = settings.agent_max_iterations
         self.verbose = verbose if verbose is not None else settings.agent_verbose
 
@@ -142,6 +147,9 @@ class BaseAgent(ABC):
 
         A turn starts with a user message and includes all subsequent assistant
         responses and tool executions.
+
+        If *turns* exceeds the number of user messages in the history, all
+        available turns are removed (i.e. the request is silently truncated).
 
         Parameters
         ----------

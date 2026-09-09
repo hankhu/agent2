@@ -160,8 +160,9 @@ class PlannerAgent(BaseAgent):
         except json.JSONDecodeError:
             pass
 
-        # Fallback: split by newlines
-        return [line.strip() for line in content.strip().split("\n") if line.strip()]
+        # Fallback: split by newlines, filtering empty / numbering-only lines
+        lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
+        return [ln for ln in lines if len(ln) > 3]
 
     async def _execute_step(
         self,

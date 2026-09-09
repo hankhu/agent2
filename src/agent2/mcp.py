@@ -167,14 +167,18 @@ class MCPManager:
             env=env,
         )
 
-        # Use context manager protocol manually so we can hold the session open
+        # Use context manager protocol manually so we can hold the session open.
+        # Wrap in try/except so already-opened resources are cleaned up on failure.
         transport_ctx = stdio_client(server_params)
         transport = await transport_ctx.__aenter__()
-        self._cleanup_fns.append(transport_ctx.__aexit__)
-
-        read_stream, write_stream = transport
-        session_ctx = ClientSession(read_stream, write_stream)
-        session = await session_ctx.__aenter__()
+        try:
+            self._cleanup_fns.append(transport_ctx.__aexit__)
+            read_stream, write_stream = transport
+            session_ctx = ClientSession(read_stream, write_stream)
+            session = await session_ctx.__aenter__()
+        except BaseException:
+            await transport_ctx.__aexit__(None, None, None)
+            raise
         self._cleanup_fns.append(session_ctx.__aexit__)
         self._sessions.append(session)
 

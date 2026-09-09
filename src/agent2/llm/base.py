@@ -43,7 +43,7 @@ def guess_context_window(model: str) -> int:
     """Best-effort context window (in tokens) for a model name."""
     m = (model or "").lower()
     for prefix, window in _CONTEXT_WINDOWS:
-        if prefix in m:
+        if m.startswith(prefix):
             return window
     return DEFAULT_CONTEXT_WINDOW
 
