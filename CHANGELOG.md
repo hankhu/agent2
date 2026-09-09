@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.3.17] - 2026-09-10
+
+### Added
+- **模型扩展配置与计价估算**：
+  - 新增 `agent2.llm.pricing` 模块与 `ModelPricing` 数据模型，内建主流模型官方费率表（OpenAI、Claude、DeepSeek、Gemini、Qwen 及本地免费模型），支持在 `~/.config/agent2/config.json` 中定义各模型或默认的 `pricing`。
+  - `BaseLLM` 与 `OpenAILLM` 全面支持 `context_window`、`temperature`、`top_k`、`top_p`、`reasoning_effort`（low / medium / high）及 `pricing`；新增 `deepseek-v4` 1M 上下文窗口支持。
+  - 自动累计 Token 费用，并在 TUI `ContextBar` / `StatusBar` 实时展示（`Session: 1.2k tokens ($0.0024)`）；`ModelSelectScreen` 与 CLI `select_model_menu` 展示各模型上下文容量与定价费率。
+- **对话历史语义压缩 (`/compact`)**：
+  - `BaseAgent` 新增异步 `compact(keep_recent_turns=1)` 方法，通过 LLM 智能提取并精简历史对话轮次与工具执行输出，释放上下文容量；
+  - TUI 视窗与 CLI 均支持 `/compact` 命令，支持指定保留轮数（`/compact [keep_turns]`）。
+- **文件引用与路径实时补全 (`@<file path>`)**：
+  - 新增 `agent2.app.tui.file_completion` 模块，在输入框键入 `@` 时提供文件/目录实时联想补全，支持多级目录导航并自动忽略 `.git`、`.venv` 等内部目录；
+  - `_process_context` 支持 `@<file path>`、`@path`、`#file`、`#dir` 语法在消息发送时自动内联文件与目录结构内容。
+
 ## [0.1.3.16] - 2026-09-10
 
 ### Fixed

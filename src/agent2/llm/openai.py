@@ -38,12 +38,22 @@ class OpenAILLM(BaseLLM):
         provider: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        context_window: int | None = None,
+        top_k: int | None = None,
+        top_p: float | None = None,
+        reasoning_effort: str | None = None,
+        pricing: Any = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
             model,
             temperature=temperature,
             max_tokens=max_tokens,
+            context_window=context_window,
+            top_k=top_k,
+            top_p=top_p,
+            reasoning_effort=reasoning_effort,
+            pricing=pricing,
             provider=provider,
             base_url=base_url,
             **kwargs,
@@ -51,6 +61,41 @@ class OpenAILLM(BaseLLM):
         self._api_key = api_key
         self._base_url = base_url
         self._client: Any = None  # lazy init
+
+    def _build_request(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[ToolSchema] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Build request dictionary for chat completions."""
+        req: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": self.max_tokens,
+            **kwargs,
+        }
+
+        # Reasoning models (like OpenAI o1/o3) reject custom temperature
+        is_o_series = self.model.lower().startswith(("o1", "o3", "o4"))
+        if not is_o_series:
+            req.setdefault("temperature", self.temperature)
+
+        if self.top_p is not None:
+            req.setdefault("top_p", self.top_p)
+
+        if self.reasoning_effort is not None:
+            req.setdefault("reasoning_effort", self.reasoning_effort)
+
+        if self.top_k is not None:
+            extra = dict(req.get("extra_body") or {})
+            extra.setdefault("top_k", self.top_k)
+            req["extra_body"] = extra
+
+        if tools:
+            req["tools"] = [self._to_oai_tool(t) for t in tools]
+
+        return req
 
     @property
     def base_url(self) -> str | None:
@@ -110,19 +155,7 @@ class OpenAILLM(BaseLLM):
 
         # Convert messages to OpenAI format
         oai_messages = [self._to_oai_message(m) for m in self._repair_tool_messages(messages)]
-
-        # Build request kwargs
-        req: dict[str, Any] = {
-            "model": self.model,
-            "messages": oai_messages,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            **kwargs,
-        }
-
-        # Add tools if provided
-        if tools:
-            req["tools"] = [self._to_oai_tool(t) for t in tools]
+        req = self._build_request(oai_messages, tools=tools, **kwargs)
 
         response = await client.chat.completions.create(**req)
         llm_response = self._from_oai_response(response)
@@ -139,16 +172,13 @@ class OpenAILLM(BaseLLM):
         client = self._get_client()
 
         oai_messages = [self._to_oai_message(m) for m in self._repair_tool_messages(messages)]
-
-        req: dict[str, Any] = {
-            "model": self.model,
-            "messages": oai_messages,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "stream": True,
-            "stream_options": {"include_usage": True},
+        req = self._build_request(
+            oai_messages,
+            tools=tools,
+            stream=True,
+            stream_options={"include_usage": True},
             **kwargs,
-        }
+        )
 
         if tools:
             req["tools"] = [self._to_oai_tool(t) for t in tools]

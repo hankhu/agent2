@@ -40,6 +40,8 @@ from rich.table import Table
 from agent2.agent.react import ReActAgent
 from agent2.app.config import get_last_model, load_config, set_last_model
 from agent2.llm import create_llm
+from agent2.llm.base import guess_context_window
+from agent2.llm.pricing import ModelPricing, guess_pricing
 from agent2.tools.builtin import file_read, file_write, shell_exec
 from agent2.utils.config import settings
 
@@ -52,6 +54,22 @@ DEFAULT_SYSTEM_MSG = (
     "executing shell commands). Use tools proactively when needed to inspect files, "
     "run commands, or create/modify code."
 )
+
+
+def _fmt_ctx_win(tokens: int) -> str:
+    if tokens >= 1_000_000:
+        return f"{tokens / 1_000_000:.1f}M".rstrip(".0M") + "M"
+    if tokens >= 1_000:
+        return f"{tokens // 1000}k"
+    return str(tokens)
+
+
+def _fmt_pricing(p: Any) -> str:
+    if isinstance(p, ModelPricing):
+        return p.format_rate()
+    if isinstance(p, dict):
+        return ModelPricing(**p).format_rate()
+    return "Free"
 
 
 # ── Model Selection Dialog ──────────────────────────────────────────
@@ -344,7 +362,25 @@ def get_available_models() -> list[dict[str, Any]]:
             "source": "preset",
         })
 
-    return [item for item in items if _visible_model(item)]
+    enriched: list[dict[str, Any]] = []
+    for item in items:
+        if not _visible_model(item):
+            continue
+        model_id = item.get("model") or item.get("name", "")
+        resolved = cfg.resolve_model(item["name"]) or {}
+        cw = resolved.get("context_window") or cfg.context_window or guess_context_window(model_id)
+        pr = resolved.get("pricing") or cfg.pricing or guess_pricing(model_id)
+        item["context_window"] = cw
+        item["context_window_str"] = _fmt_ctx_win(cw)
+        item["pricing"] = pr
+        item["pricing_rate"] = _fmt_pricing(pr)
+        item["temperature"] = resolved.get("temperature", cfg.temperature)
+        item["top_k"] = resolved.get("top_k", cfg.top_k)
+        item["top_p"] = resolved.get("top_p", cfg.top_p)
+        item["reasoning_effort"] = resolved.get("reasoning_effort", cfg.reasoning_effort)
+        enriched.append(item)
+
+    return enriched
 
 
 
@@ -364,7 +400,9 @@ def select_model_menu(current_name: str | None = None) -> str:
     )
     table.add_column("#", justify="center", style="bold yellow", width=4)
     table.add_column("Provider", style="bold green", min_width=10, max_width=16, overflow="ellipsis")
-    table.add_column("Model", style="bright_white", min_width=18, max_width=50, overflow="ellipsis")
+    table.add_column("Model", style="bright_white", min_width=18, max_width=36, overflow="ellipsis")
+    table.add_column("Context", justify="right", style="bold cyan", width=8)
+    table.add_column("Pricing", justify="right", style="dim", width=18)
     table.add_column("Status", justify="center", width=10)
 
     default_idx = 1
@@ -382,6 +420,8 @@ def select_model_menu(current_name: str | None = None) -> str:
             str(idx),
             m.get("provider") or m["name"],
             m["model"],
+            m.get("context_window_str", "—"),
+            m.get("pricing_rate", "—"),
             status,
         )
 
@@ -538,6 +578,7 @@ def _print_help() -> None:
     table.add_row("/skills", "List available skills (use /<skill_name> [prompt] to invoke)")
     table.add_row("/yolo [on|off|show]", "YOLO / Autopilot mode: auto-approve operations & autonomous decisions")
     table.add_row("/allow-all [on|off|show]", "Allow-all mode: auto-approve all operations")
+    table.add_row("/compact [keep]", "Compact conversation context to free window capacity")
     table.add_row("/clear", "Clear conversation history")
     table.add_row("/help", "Show this help table")
     table.add_row("exit / quit", "Exit the chat session (or Ctrl+C / Ctrl+D)")
@@ -740,6 +781,20 @@ async def _run_interactive(
                 console.print("\n[bold yellow]🧹 Conversation history cleared.[/bold yellow]\n")
                 continue
 
+            elif cmd == "/compact":
+                keep_turns = 1
+                if arg and arg.strip().isdigit():
+                    keep_turns = max(0, int(arg.strip()))
+                console.print("\n[dim]🧹 Compacting conversation context…[/dim]")
+                stats = await agent.compact(keep_recent_turns=keep_turns)
+                if stats.get("status") == "skipped":
+                    console.print(f"[yellow]⚠️ Compacting skipped: {stats.get('reason')}[/yellow]\n")
+                else:
+                    console.print(
+                        f"[bold green]🧹 Conversation compacted: {stats['messages_before']} messages → {stats['messages_after']} messages.[/bold green]\n"
+                    )
+                continue
+
             elif cmd == "/help":
                 _print_help()
                 continue
@@ -770,14 +825,17 @@ async def _run_interactive(
                         f"---\n\n"
                         f"{arg or 'Please proceed with your expertise.'}"
                     )
-                    await agent.chat(skill_prompt)
+                    from agent2.app.tui.screens.chat import _process_context
+                    await agent.chat(_process_context(skill_prompt))
                 else:
                     console.print(
                         f"[dim yellow]Unknown command: {cmd}. Type [bold]/help[/bold] for available commands.[/dim yellow]"
                     )
                 continue
 
-        await agent.chat(user_input)
+        from agent2.app.tui.screens.chat import _process_context
+        processed_input = _process_context(user_input)
+        await agent.chat(processed_input)
 
 
 # ── CLI entry point ────────────────────────────────────────────────

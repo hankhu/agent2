@@ -180,7 +180,15 @@ class ModelSelectScreen(ModalScreen[str]):
             provider = resolve_provider_or_host(m.get("provider"), m.get("base_url"))
             model_id = m.get("model", "")
             meta = f"\\[{provider}] {model_id}" if provider else model_id
-            line = f"  {name:<36}  [dim]·  {meta}[/dim]"
+            ctx = m.get("context_window_str") or ""
+            pricing_rate = m.get("pricing_rate") or ""
+            details = [meta]
+            if ctx:
+                details.append(f"ctx {ctx}")
+            if pricing_rate and pricing_rate != "Free":
+                details.append(pricing_rate)
+            details_str = "  ·  ".join(details)
+            line = f"  {name:<28}  [dim]·  {details_str}[/dim]"
             opt_list.add_option(Option(line, id=name))
 
         opt_list.highlighted = 0

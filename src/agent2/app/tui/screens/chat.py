@@ -56,6 +56,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/models", "Alias for /model"),
     ("/skills", "List available skills (use /<skill_name> to invoke)"),
     ("/clear", "Clear display"),
+    ("/compact", "Compact conversation context to free window capacity (/compact [keep_turns])"),
     ("/retry", "Retry last user query / regenerate response"),
     ("/continue", "Continue execution if paused or reached max iterations"),
     ("/rewind", "Rewind to previous conversation round"),
@@ -431,7 +432,27 @@ class ChatScreen(Screen):
                     shortcut_help.hide_help()
             except Exception:
                 pass
-        # Show completions only when text starts with / and has no space yet
+
+        # 1. Check for @file completion at cursor
+        cursor_loc = event.text_area.cursor_location
+        lines = text.splitlines()
+        row = cursor_loc[0] if cursor_loc else 0
+        col = cursor_loc[1] if cursor_loc else 0
+        current_line = lines[row] if row < len(lines) else ""
+        current_prefix = current_line[:col]
+
+        at_match = re.search(r'(?:^|\s)@([^\s@]*)$', current_prefix)
+        if at_match:
+            from agent2.app.tui.file_completion import get_file_completions
+
+            file_query = at_match.group(1)
+            file_matches = get_file_completions(file_query)
+            if file_matches:
+                self._completion_mode = "file"
+                self._show_completion(file_matches)
+                return
+
+        # 2. Show completions when text starts with / and has no space yet
         if text.startswith("/") and " " not in text:
             prefix = text.lower()
             all_commands = self._get_completions()
@@ -441,8 +462,10 @@ class ChatScreen(Screen):
                 if cmd.lower().startswith(prefix)
             ]
             if matches:
+                self._completion_mode = "command"
                 self._show_completion(matches)
                 return
+
         self._hide_completion()
 
     def on_chat_input_completion_key(self, event: ChatInput.CompletionKey) -> None:
@@ -494,8 +517,30 @@ class ChatScreen(Screen):
                 cmd = str(option.id) if option.id else None
         if cmd:
             chat_input = self.query_one("#chat-input", ChatInput)
-            chat_input.clear()
-            chat_input.insert(cmd + " ")
+            if getattr(self, "_completion_mode", "command") == "file":
+                cursor_loc = chat_input.cursor_location
+                lines = chat_input.text.splitlines()
+                if not lines:
+                    lines = [""]
+                row = cursor_loc[0] if cursor_loc else 0
+                col = cursor_loc[1] if cursor_loc else 0
+                if row < len(lines):
+                    line = lines[row]
+                    prefix = line[:col]
+                    at_match = re.search(r'(?:^|\s)@([^\s@]*)$', prefix)
+                    if at_match:
+                        token_start = at_match.start()
+                        if prefix[token_start] in (" ", "\t"):
+                            token_start += 1
+                        suffix = line[col:]
+                        insert_val = cmd if cmd.endswith("/") else cmd + " "
+                        new_line = line[:token_start] + insert_val + suffix
+                        lines[row] = new_line
+                        chat_input.text = "\n".join(lines)
+                        chat_input.cursor_location = (row, token_start + len(insert_val))
+            else:
+                chat_input.clear()
+                chat_input.insert(cmd + " ")
         self._hide_completion()
 
     # ── Agent worker ────────────────────────────────────────────
@@ -701,6 +746,43 @@ class ChatScreen(Screen):
 
         self._save_session()
 
+    @work(exclusive=True, group="agent")
+    async def _compact_conversation(self, keep_turns: int = 1) -> None:
+        """Compact conversation history by semantically summarizing past rounds."""
+        app: Agent2App = self.app  # type: ignore[assignment]
+        messages = self.query_one("#messages", MessageList)
+
+        self._run_generation += 1
+        generation = self._run_generation
+        self._set_busy(True, "Compacting conversation…")
+        messages.add_system_message("🧹 正在压缩对话历史上下文...")
+
+        try:
+            stats = await app.agent.compact(keep_recent_turns=keep_turns)
+            if stats.get("status") == "skipped":
+                reason = stats.get("reason", "Not enough turns to compact")
+                messages.add_system_message(f"⚠️ 对话未压缩：{reason}。")
+            else:
+                messages.clear_messages()
+                self._rebuild_messages()
+                self._save_session()
+                self._sync_status_bar()
+                messages.add_system_message(
+                    f"🧹 对话上下文已压缩：原 {stats['messages_before']} 条消息已精简为 {stats['messages_after']} 条消息。"
+                )
+                app.session_manager.log_event(
+                    app.session_id,
+                    "COMPACT",
+                    f"Compacted from {stats['messages_before']} to {stats['messages_after']} messages",
+                )
+        except Exception as exc:
+            messages.add_system_message(f"❌ 压缩对话上下文失败：{exc}")
+            app.session_manager.log_event(app.session_id, "ERROR", f"Compact error: {exc}")
+        finally:
+            if generation == self._run_generation:
+                self._set_busy(False)
+            self._sync_status_bar()
+
     # ── HITL approval via Future ────────────────────────────────
 
     async def _request_approval(self, tool_call) -> str:  # type: ignore[type-arg]
@@ -854,6 +936,17 @@ class ChatScreen(Screen):
             messages.clear_messages()
             messages.mount(WelcomeBanner(id="welcome-banner"))
             messages.add_system_message("🧹 Display cleared.")
+
+        elif cmd == "/compact":
+            if self.query_one(StatusBar).busy:
+                messages.add_system_message("⚠️ Agent 正在执行中，请先等待或按 Ctrl+C 中断。")
+                return
+
+            keep_turns = 1
+            if arg and arg.strip().isdigit():
+                keep_turns = max(0, int(arg.strip()))
+
+            self._compact_conversation(keep_turns)
 
         elif cmd == "/retry":
             if self.query_one(StatusBar).busy:
@@ -1506,6 +1599,9 @@ class ChatScreen(Screen):
             ctx_tok = last.prompt_tokens
             status.context_tokens = ctx_tok
 
+        total_cost = getattr(llm, "total_cost", 0.0) or 0.0
+        status.cost = total_cost
+
         if context_bar is not None:
             context_bar.model_name = llm.model
             context_bar.provider = provider_disp
@@ -1513,6 +1609,7 @@ class ChatScreen(Screen):
             context_bar.input_tokens = in_tok
             context_bar.output_tokens = out_tok
             context_bar.context_tokens = ctx_tok
+            context_bar.cost = total_cost
             context_bar.busy = status.busy
             context_bar.status_text = status.status_text
 
@@ -1543,6 +1640,32 @@ def _process_context(text: str) -> str:
         except Exception as exc:
             return f"\n[Error reading dir {p}: {exc}]\n"
 
+    def _read_at_ref(m: re.Match[str]) -> str:
+        raw_path = m.group(1).strip()
+        if raw_path.startswith("<") and raw_path.endswith(">"):
+            raw_path = raw_path[1:-1].strip()
+        p = Path(raw_path).expanduser()
+        if not p.exists():
+            return m.group(0)
+        if p.is_dir():
+            try:
+                entries = sorted(p.iterdir())
+                listing = "\n".join(
+                    f"{'[dir]' if e.is_dir() else '[file]'} {e.name}"
+                    for e in entries
+                    if not e.name.startswith(".")
+                )
+                return f'\n<directory path="{p}">\n{listing}\n</directory>\n'
+            except Exception as exc:
+                return f"\n[Error reading dir {p}: {exc}]\n"
+        else:
+            try:
+                content = p.read_text(encoding="utf-8")
+                return f'\n<file path="{p}">\n{content}\n</file>\n'
+            except Exception as exc:
+                return f"\n[Error reading {p}: {exc}]\n"
+
     text = re.sub(r"#file\s+(\S+)", _read_file, text)
     text = re.sub(r"#dir\s+(\S+)", _read_dir, text)
+    text = re.sub(r"(?:^|(?<=\s))@(\S+)", _read_at_ref, text)
     return text

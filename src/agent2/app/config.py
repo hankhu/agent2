@@ -104,6 +104,26 @@ class AppConfig(BaseModel):
         default=4096,
         description="Default maximum tokens for responses",
     )
+    context_window: int | None = Field(
+        default=None,
+        description="Default context window size in tokens",
+    )
+    top_k: int | None = Field(
+        default=None,
+        description="Default top-k sampling parameter",
+    )
+    top_p: float | None = Field(
+        default=None,
+        description="Default top-p sampling parameter",
+    )
+    reasoning_effort: str | None = Field(
+        default=None,
+        description="Default reasoning effort (low, medium, high)",
+    )
+    pricing: dict[str, Any] | None = Field(
+        default=None,
+        description="Default pricing configuration",
+    )
     max_iterations: int = Field(
         default=50,
         description="Default maximum iterations / turns for the agent reasoning loop",
@@ -218,6 +238,16 @@ class AppConfig(BaseModel):
                     res["temperature"] = self.temperature
                 if "max_tokens" not in res:
                     res["max_tokens"] = self.max_tokens
+                if "context_window" not in res and self.context_window is not None:
+                    res["context_window"] = self.context_window
+                if "top_k" not in res and self.top_k is not None:
+                    res["top_k"] = self.top_k
+                if "top_p" not in res and self.top_p is not None:
+                    res["top_p"] = self.top_p
+                if "reasoning_effort" not in res and self.reasoning_effort is not None:
+                    res["reasoning_effort"] = self.reasoning_effort
+                if "pricing" not in res and self.pricing is not None:
+                    res["pricing"] = self.pricing
                 return res
             elif isinstance(entry, str):
                 if entry in self.providers:
@@ -229,24 +259,39 @@ class AppConfig(BaseModel):
                         "api_key": p.api_key,
                         "temperature": self.temperature,
                         "max_tokens": self.max_tokens,
+                        "context_window": self.context_window,
+                        "top_k": self.top_k,
+                        "top_p": self.top_p,
+                        "reasoning_effort": self.reasoning_effort,
+                        "pricing": self.pricing,
                     }
                 return {
                     "model": entry,
                     "temperature": self.temperature,
                     "max_tokens": self.max_tokens,
+                    "context_window": self.context_window,
+                    "top_k": self.top_k,
+                    "top_p": self.top_p,
+                    "reasoning_effort": self.reasoning_effort,
+                    "pricing": self.pricing,
                 }
 
         # 4. If name_or_alias matches a provider name directly
         if key_l in self.providers or key in self.providers:
-            p = self.providers.get(key) or self.providers.get(key_l)
-            if p:
+            prov_entry = self.providers.get(key) or self.providers.get(key_l)
+            if prov_entry is not None:
                 return {
                     "model": key,
                     "provider": key,
-                    "base_url": p.base_url,
-                    "api_key": p.api_key,
+                    "base_url": prov_entry.base_url,
+                    "api_key": prov_entry.api_key,
                     "temperature": self.temperature,
                     "max_tokens": self.max_tokens,
+                    "context_window": self.context_window,
+                    "top_k": self.top_k,
+                    "top_p": self.top_p,
+                    "reasoning_effort": self.reasoning_effort,
+                    "pricing": self.pricing,
                 }
 
         return None

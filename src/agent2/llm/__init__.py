@@ -25,6 +25,7 @@ from agent2.llm.message import (
     ToolParameter,
     Usage,
 )
+from agent2.llm.pricing import ModelPricing, guess_pricing
 
 __all__ = [
     "BaseLLM",
@@ -37,6 +38,8 @@ __all__ = [
     "ToolSchema",
     "ToolParameter",
     "Usage",
+    "ModelPricing",
+    "guess_pricing",
     "create_llm",
 ]
 
@@ -76,18 +79,34 @@ def create_llm(name_or_model: str = "openai", **kwargs: Any) -> OpenAILLM:
         logging.getLogger(__name__).debug("Config-based LLM creation skipped: %s", exc)
 
     # 2. Built-in presets
-    if key in ("openai", "default"):
-        defaults: dict[str, Any] = {"provider": "openai"}
-        try:
-            from agent2.app.config import load_config
+    cfg = None
+    try:
+        from agent2.app.config import load_config
+        cfg = load_config()
+    except Exception:
+        pass
 
-            cfg = load_config()
-            if cfg.llm.base_url and "base_url" not in kwargs:
-                defaults["base_url"] = cfg.llm.base_url
-            if cfg.llm.provider and "provider" not in kwargs:
-                defaults["provider"] = cfg.llm.provider
-        except Exception:
-            pass
+    global_extras: dict[str, Any] = {}
+    if cfg is not None:
+        if cfg.context_window is not None:
+            global_extras["context_window"] = cfg.context_window
+        if cfg.top_k is not None:
+            global_extras["top_k"] = cfg.top_k
+        if cfg.top_p is not None:
+            global_extras["top_p"] = cfg.top_p
+        if cfg.reasoning_effort is not None:
+            global_extras["reasoning_effort"] = cfg.reasoning_effort
+        if cfg.pricing is not None:
+            global_extras["pricing"] = cfg.pricing
+        if cfg.temperature is not None:
+            global_extras["temperature"] = cfg.temperature
+
+    if key in ("openai", "default"):
+        defaults: dict[str, Any] = {"provider": "openai", **global_extras}
+        if cfg and cfg.llm.base_url and "base_url" not in kwargs:
+            defaults["base_url"] = cfg.llm.base_url
+        if cfg and cfg.llm.provider and "provider" not in kwargs:
+            defaults["provider"] = cfg.llm.provider
         return OpenAILLM(**{**defaults, **kwargs})
     elif key == "ollama":
         defaults = {
@@ -95,6 +114,7 @@ def create_llm(name_or_model: str = "openai", **kwargs: Any) -> OpenAILLM:
             "base_url": "http://localhost:11434/v1",
             "api_key": "ollama",
             "provider": "ollama",
+            **global_extras,
         }
         return OpenAILLM(**{**defaults, **kwargs})
     elif key == "deepseek":
@@ -102,21 +122,17 @@ def create_llm(name_or_model: str = "openai", **kwargs: Any) -> OpenAILLM:
             "model": "deepseek-chat",
             "base_url": "https://api.deepseek.com/v1",
             "provider": "deepseek",
+            **global_extras,
         }
         return OpenAILLM(**{**defaults, **kwargs})
 
     # 3. Direct model name
-    if "model" not in kwargs:
-        kwargs["model"] = name_or_model
-    try:
-        from agent2.app.config import load_config
-
-        cfg = load_config()
+    direct_args: dict[str, Any] = {"model": name_or_model, **global_extras}
+    if cfg:
         if cfg.llm.base_url and "base_url" not in kwargs:
-            kwargs["base_url"] = cfg.llm.base_url
+            direct_args["base_url"] = cfg.llm.base_url
         if cfg.llm.provider and "provider" not in kwargs:
-            kwargs["provider"] = cfg.llm.provider
-    except Exception:
-        pass
-    return OpenAILLM(**kwargs)
+            direct_args["provider"] = cfg.llm.provider
+    direct_args.update(kwargs)
+    return OpenAILLM(**direct_args)
 

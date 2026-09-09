@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.3.16 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.17 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -8,6 +8,8 @@
 
 - **统一接口** — `BaseLLM` 抽象类定义 `chat()` / `chat_stream()` 两个核心方法，所有提供商共用同一套消息模型。
 - **OpenAI 兼容适配器** — `OpenAILLM` 封装 `openai.AsyncOpenAI`，支持任何 OpenAI-compatible API（OpenAI / DeepSeek / Ollama / vLLM / Qwen 等），自动处理 `/v1` 路径补全。
+- **全方位模型参数配置** — 支持 `context_window`（支持 `deepseek-v4` 1M 等主流模型自动推导与配置）、`temperature`、`top_k`、`top_p` 与 `reasoning_effort`（low / medium / high）。
+- **计价与成本估算** — `ModelPricing` 内建官方模型费率（USD/1M tokens），自动累计会话请求费用，并在状态栏与模型选择器中清晰呈现。
 - **协议自愈与修复** — `_repair_tool_messages()` 自动校验并补齐缺失的 `tool` 响应消息，确保符合 OpenAI 协议规范。
 - **流式输出** — `chat_stream()` 支持 SSE 逐 token 流式返回。
 - **统一消息模型** — `Message`（system / user / assistant / tool 四种角色）、`ToolCall`、`ToolResult`、`ToolSchema`、`LLMResponse`、`Usage`，全部基于 Pydantic。
@@ -121,7 +123,7 @@
   - **单轮模式** (`-p`) — 发送消息、执行、退出。
   - **交互模式** — 多轮对话，支持 `-i` 预填首条消息。
   - **模型选择** — `-s` 启动时弹出交互菜单；`--model` 直接指定；支持 Provider 自动推导与紧凑排版。
-  - **斜杠命令** — `/model`（切换模型）、`/tools`（查看工具）、`/skills`（浏览/调用技能）、`/yolo`、`/allow-all`、`/clear`（清空历史）、`/help`。
+  - **斜杠命令** — `/model`（切换模型）、`/tools`（查看工具）、`/skills`（浏览/调用技能）、`/yolo`、`/allow-all`、`/compact`（压缩对话上下文）、`/clear`（清空历史）、`/help`。
   - **纯聊天模式** — `--no-tools` 禁用内置工具。
   - 自动隐藏无 API Key 的远程模型，保留本地/局域网模型。
 
@@ -184,6 +186,8 @@
   - **最大轮数限制无缝继续** — ReAct loop 达到 `max_iterations` 时触发 HITL 继续审批弹窗，确认后追加轮数无缝继续执行；达到上限停止后提供 `▶ Continue` 按钮。
   - **输入历史导航 (`ChatInput`)** — 方向键 ↑ / ↓ 快速浏览和填充历史输入（含 `/` 斜杠命令与常规聊天文本），保留草稿编辑状态，调出历史记录时光标自动置于行尾并智能抑制补全浮层拦截。
   - **进程挂起与后台切换 (`Ctrl-Z`)** — 全局高优先级快捷键 `Ctrl-Z` 发送 `SIGTSTP` 将进程挂起进入后台，终端输入 `fg` 即可无缝恢复。
+  - **对话上下文语义压缩 (`/compact`)** — 智能对历史多轮对话与工具输出执行语义摘要并替换早先历史，释放上下文容量；在 TUI 与 CLI 均可随时触发。
+  - **文件引用与路径补全 (`@<file path>`)** — 输入 `@` 触发工作区文件与目录列表弹窗，支持多级目录浏览、回车补全与提交时自动内联内容。
   - **会话标题智能清洗** — 自动剔除 `<file>`、`<directory>` 等注入的上下文标签，保持会话列表标题整洁。
 
 

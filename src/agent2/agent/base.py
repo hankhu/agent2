@@ -7,7 +7,8 @@ import logging as _logging
 import copy
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Self
+from pathlib import Path
+from typing import Any, Self, TextIO
 
 from agent2.llm.base import BaseLLM
 from agent2.llm import create_llm
@@ -198,6 +199,125 @@ class BaseAgent(ABC):
         removed = self._messages[cutoff:]
         self._messages = self._messages[:cutoff]
         return removed
+
+    async def compact(self, *, keep_recent_turns: int = 1) -> dict[str, Any]:
+        """Compact conversation history by semantically summarizing past turns.
+
+        Preserves system prompt and the specified number of most recent turns
+        (default 1), replacing earlier rounds and tool executions with a concise
+        semantic summary produced by the LLM.
+
+        Parameters
+        ----------
+        keep_recent_turns : int
+            Number of recent user turns to retain uncompressed.
+
+        Returns
+        -------
+        dict[str, Any]
+            Compaction summary with status, messages_before, messages_after,
+            and the summary text.
+        """
+        user_indices = [
+            i for i, m in enumerate(self._messages)
+            if m.role == Role.USER
+        ]
+        if not user_indices or len(user_indices) <= keep_recent_turns:
+            return {
+                "status": "skipped",
+                "reason": "Not enough turns to compact",
+                "messages_before": len(self._messages),
+                "messages_after": len(self._messages),
+                "summary": "",
+            }
+
+        split_idx = user_indices[-keep_recent_turns]
+        sys_offset = 1 if (self._messages and self._messages[0].role == Role.SYSTEM) else 0
+
+        to_summarize = self._messages[sys_offset:split_idx]
+        to_keep = self._messages[split_idx:]
+
+        if not to_summarize:
+            return {
+                "status": "skipped",
+                "reason": "No messages to summarize",
+                "messages_before": len(self._messages),
+                "messages_after": len(self._messages),
+                "summary": "",
+            }
+
+        # Build transcript of messages to summarize
+        transcript_lines: list[str] = []
+        for m in to_summarize:
+            role_label = m.role.value.upper()
+            if m.role == Role.TOOL and m.tool_result:
+                content = m.tool_result.content
+                if len(content) > 1000:
+                    content = content[:1000] + " ...[truncated]"
+                transcript_lines.append(f"[TOOL RESULT ({m.tool_result.tool_call_id})]: {content}")
+            elif m.role == Role.ASSISTANT and m.tool_calls:
+                call_descs = [f"{tc.name}({tc.arguments})" for tc in m.tool_calls]
+                text = m.content or ""
+                transcript_lines.append(f"[ASSISTANT]: {text}\n[CALLS]: {', '.join(call_descs)}")
+            elif m.content:
+                content = m.content
+                if len(content) > 2000:
+                    content = content[:2000] + " ...[truncated]"
+                transcript_lines.append(f"[{role_label}]: {content}")
+
+        history_text = "\n\n".join(transcript_lines)
+
+        summary_prompt = (
+            "You are an expert conversation summarizer for an AI assistant.\n"
+            "Summarize the preceding conversation history into a structured, concise brief.\n"
+            "Preserve:\n"
+            "1. User goals, instructions, and constraints.\n"
+            "2. Key actions taken, tools invoked, and files modified or inspected.\n"
+            "3. Crucial findings, conclusions, and decisions reached.\n"
+            "4. Current pending tasks or next steps.\n\n"
+            "--- Conversation History ---\n"
+            f"{history_text}\n"
+            "--- End History ---\n\n"
+            "Provide only the concise summary."
+        )
+
+        try:
+            summary_response = await self.llm.chat([
+                Message.system("You are a concise conversation summarizer."),
+                Message.user(summary_prompt),
+            ])
+            summary_content = (summary_response.content or "").strip()
+        except Exception as exc:
+            summary_content = f"[Compacted {len(to_summarize)} messages: summary generation failed ({exc})]"
+
+        if not summary_content:
+            summary_content = f"[Compacted {len(to_summarize)} messages from earlier conversation]"
+
+        # Reassemble messages
+        new_messages: list[Message] = []
+        if sys_offset > 0:
+            new_messages.append(self._messages[0])
+
+        new_messages.append(Message.user(
+            f"--- Context Summary of Previous Conversation (compacted) ---\n"
+            f"{summary_content}\n"
+            f"--- End Summary ---"
+        ))
+        new_messages.append(Message.assistant(
+            "Understood. I have preserved the context from our previous discussion and am ready to proceed."
+        ))
+        new_messages.extend(to_keep)
+
+        before_count = len(self._messages)
+        self._messages = new_messages
+        after_count = len(self._messages)
+
+        return {
+            "status": "compacted",
+            "messages_before": before_count,
+            "messages_after": after_count,
+            "summary": summary_content,
+        }
 
     # ── Serialization & Persistence ─────────────────────────────────
 

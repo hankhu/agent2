@@ -393,3 +393,22 @@
   - `README.md`：快捷键行补充 `Ctrl+Z 挂起至后台`。
 
 - **测试**：全量 169 项自动化测试全部通过。
+
+## 36. 模型配置扩展、对话语义压缩(/compact)与文件路径补全(@file) (2026-09-10)
+
+- **扩展模型参数与计价模块**（`llm/pricing.py`、`llm/base.py`、`llm/openai.py`、`app/config.py`）：
+  - 新增 `agent2.llm.pricing` 模块与 `ModelPricing` 数据模型（输入/输出每 100万 tokens 美元费率），内建 OpenAI、Claude、DeepSeek、Gemini、Qwen 及本地免费模型费率表；
+  - `BaseLLM` 与 `OpenAILLM` 支持 `context_window`、`temperature`、`top_k`、`top_p`、`reasoning_effort` 与 `pricing`；
+  - `_CONTEXT_WINDOWS` 新增 `deepseek-v4`（1M）、`gemini-2.0`（1M）、`o3-mini`（200k）、`claude-3-7`（200k）等现代模型；针对 OpenAI o 系列推理模型自动处理 `temperature` 不受支持的问题；
+  - 会话自动累加计费，在 TUI `ContextBar` / `StatusBar` 实时显示 Token 开销估算，并在 `ModelSelectScreen` 与 CLI `select_model_menu` 中呈现容量与费率。
+
+- **对话历史语义压缩**（`agent/base.py`、`app/tui/screens/chat.py`、`app/chat.py`）：
+  - `BaseAgent.compact(keep_recent_turns=1)`：多轮历史过长时，调用 LLM 对过往多轮交互与工具执行输出进行语义摘要并保留关键系统设定与最近轮次，大幅释放上下文窗口；
+  - 在 TUI 视窗与 CLI 聊天均接入 `/compact [keep_turns]` 命令，配套 `COMPACT` 会话生命周期日志与界面通知。
+
+- **文件引用与实时路径补全**（`app/tui/file_completion.py`、`app/tui/screens/chat.py`、`app/chat.py`）：
+  - 新增 `agent2.app.tui.file_completion`：在输入框键入 `@` 时触发文件/目录实时联想补全浮层，支持层级路径递归与内部无关目录过滤；
+  - `_process_context` 全面支持 `@<file path>`、`@path`、`#file`、`#dir` 语法在发送消息时自动注入文件与目录内容。
+
+- **测试**：全量 180 项自动化测试全部通过。
+

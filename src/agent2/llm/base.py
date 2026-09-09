@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
 
 from agent2.llm.message import LLMResponse, Message, ToolSchema, Usage
+from agent2.llm.pricing import ModelPricing, guess_pricing
 
 
 # ── Context window lookup ──────────────────────────────────────────
@@ -21,14 +22,25 @@ _CONTEXT_WINDOWS: tuple[tuple[str, int], ...] = (
     ("o1-mini", 128_000),
     ("o1-", 200_000),
     ("o1", 200_000),
+    ("o3-mini", 200_000),
     ("o3", 200_000),
     ("o4", 200_000),
+    ("deepseek-v4", 1_000_000),
+    ("deepseek-reasoner", 64_000),
+    ("deepseek-r1", 64_000),
     ("deepseek", 128_000),
+    ("claude-3-7", 200_000),
+    ("claude-3-5", 200_000),
     ("claude", 200_000),
+    ("gemini-2.0", 1_000_000),
+    ("gemini-1.5", 1_000_000),
     ("gemini", 1_000_000),
+    ("llama-3.3", 128_000),
+    ("llama-3.2", 128_000),
     ("llama-3.1", 128_000),
     ("llama3.1", 128_000),
     ("llama3", 8_192),
+    ("qwen2.5", 128_000),
     ("qwen", 128_000),
     ("mistral", 128_000),
     ("kimi", 128_000),
@@ -61,6 +73,14 @@ class BaseLLM(ABC):
         Maximum tokens to generate.
     context_window : int | None
         Context window size in tokens. If omitted, guessed from the model name.
+    top_k : int | None
+        Top-k sampling parameter.
+    top_p : float | None
+        Top-p (nucleus) sampling parameter.
+    reasoning_effort : str | None
+        Constrains effort on reasoning models (e.g. ``"low"``, ``"medium"``, ``"high"``).
+    pricing : ModelPricing | dict[str, Any] | None
+        Pricing configuration for token usage cost estimation.
     """
 
     def __init__(
@@ -70,6 +90,10 @@ class BaseLLM(ABC):
         temperature: float = 0.7,
         max_tokens: int = 4096,
         context_window: int | None = None,
+        top_k: int | None = None,
+        top_p: float | None = None,
+        reasoning_effort: str | None = None,
+        pricing: ModelPricing | dict[str, Any] | None = None,
         provider: str | None = None,
         base_url: str | None = None,
         **kwargs: Any,
@@ -80,9 +104,26 @@ class BaseLLM(ABC):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.context_window = context_window or guess_context_window(model)
-        # Usage tracking — updated by subclasses after each request.
+        self.top_k = top_k
+        self.top_p = top_p
+        self.reasoning_effort = reasoning_effort
+
+        if isinstance(pricing, ModelPricing):
+            self.pricing = pricing
+        elif isinstance(pricing, dict):
+            self.pricing = ModelPricing(
+                input_cost_per_million=pricing.get("input", pricing.get("input_cost_per_million", 0.0)),
+                output_cost_per_million=pricing.get("output", pricing.get("output_cost_per_million", 0.0)),
+                currency=pricing.get("currency", "USD"),
+            )
+        else:
+            self.pricing = guess_pricing(model)
+
+        # Usage & Cost tracking — updated by subclasses after each request.
         self.last_usage: Usage | None = None
         self.total_usage: Usage = Usage()
+        self.last_cost: float = 0.0
+        self.total_cost: float = 0.0
         self._extra = kwargs
 
     def _record_usage(self, usage: Usage | None) -> None:
@@ -91,6 +132,9 @@ class BaseLLM(ABC):
             return
         self.last_usage = usage
         self.total_usage = self.total_usage + usage
+        cost = self.pricing.calculate_cost(usage.prompt_tokens, usage.completion_tokens)
+        self.last_cost = cost
+        self.total_cost = round(self.total_cost + cost, 6)
 
     # ── Core interface ──────────────────────────────────────────────
 

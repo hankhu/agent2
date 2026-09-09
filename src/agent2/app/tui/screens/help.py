@@ -29,6 +29,7 @@ HELP_MARKDOWN = """
 ### 🛠️ Slash Commands
 - **/model** `[name]`: Switch LLM model
 - **/sessions**: List, resume, rename, or delete saved sessions
+- **/compact** `[keep]`: Compact conversation context to free window capacity
 - **/clear**: Clear current screen display
 - **/retry**: Retry last user query / regenerate response
 - **/continue**: Continue execution if paused
@@ -39,6 +40,7 @@ HELP_MARKDOWN = """
 - **/allow-all** `[on|off|show]`: Auto-approve all tool operations
 
 ### 📁 Context Injection
+- **@`<file path>`**: File/directory autocomplete and inline context injection
 - **#file `<path>`**: Inject specified file content into context
 - **#dir `<path>`**: Inject directory listing into context
 """

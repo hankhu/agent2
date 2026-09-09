@@ -52,6 +52,7 @@ class ContextBar(Static):
     output_tokens: reactive[int] = reactive(0)
     context_tokens: reactive[int] = reactive(0)
     context_window: reactive[int] = reactive(0)
+    cost: reactive[float] = reactive(0.0)
 
     def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(*args, **kwargs)
@@ -105,10 +106,11 @@ class ContextBar(Static):
         # Right side: Session token usage and context
         right_items = []
         total_tokens = self.input_tokens + self.output_tokens
+        cost_str = f" (${self.cost:.4f})" if self.cost > 0 else ""
         if total_tokens > 0:
-            right_items.append(f"Session: [bold]{_fmt_tokens(total_tokens)}[/bold] tokens")
+            right_items.append(f"Session: [bold]{_fmt_tokens(total_tokens)}[/bold] tokens{cost_str}")
         else:
-            right_items.append("Session: 0 tokens")
+            right_items.append(f"Session: 0 tokens{cost_str}")
 
         if self.context_window and self.context_tokens:
             pct = self.context_tokens * 100 / self.context_window
@@ -144,6 +146,7 @@ class StatusBar(Static):
     output_tokens: reactive[int] = reactive(0)
     context_tokens: reactive[int] = reactive(0)
     context_window: reactive[int] = reactive(0)
+    cost: reactive[float] = reactive(0.0)
 
     def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(*args, **kwargs)
