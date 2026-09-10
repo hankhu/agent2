@@ -59,7 +59,7 @@ class MessageList(ScrollableContainer):
     """Vertically scrollable container for conversation messages."""
 
     def on_mount(self) -> None:
-        self.anchor(True)
+        pass
 
     def on_key(self, event: events.Key) -> None:
         if (

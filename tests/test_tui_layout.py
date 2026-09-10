@@ -8,6 +8,7 @@ from textual.app import App, ComposeResult
 from agent2.agent.react import ReActAgent
 from agent2.app.tui.app import Agent2App
 from agent2.app.tui.screens.help import HelpScreen
+from agent2.app.tui.widgets.input_area import ChatInput
 from agent2.app.tui.widgets.nav_bar import TopTabBar
 from agent2.app.tui.widgets.status_bar import ContextBar, FooterBar, StatusBar
 from agent2.app.tui.widgets.welcome_banner import WelcomeBanner
@@ -97,6 +98,16 @@ async def test_full_app_layout_widgets(tmp_path: Path) -> None:
         from agent2.app.tui.screens.session_select import SessionSelectScreen
 
         await pilot.press("tab")
+        await pilot.pause()
+        assert isinstance(app.screen, SessionSelectScreen)
+        assert app.screen.query_one(TopTabBar).active_tab == "sessions"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen is screen
+        assert top_bar.active_tab == "current"
+
+        # '+' shortcut also opens the sessions view immediately
+        await pilot.press("plus")
         await pilot.pause()
         assert isinstance(app.screen, SessionSelectScreen)
         assert app.screen.query_one(TopTabBar).active_tab == "sessions"
@@ -440,4 +451,155 @@ async def test_agent2_app_ctrl_z_suspend() -> None:
         assert app.action_suspend_process.call_count == 1
         await pilot.press("ctrl-z")
         assert app.action_suspend_process.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_shift_tab_from_sessions_highlights_current_tab() -> None:
+    """Ensure switching from Sessions tab to Current tab via Shift+Tab lights up Current tab."""
+    from agent2.app.tui.screens.session_select import SessionSelectScreen
+    from agent2.app.tui.screens.skill_select import SkillSelectScreen
+    from agent2.app.tui.screens.chat import ChatScreen
+
+    app = Agent2App(agent=ReActAgent(name="test", llm=DummyLLM()))
+    async with app.run_test(size=(100, 30)) as pilot:
+        # Scenario 1: Tab into SessionSelectScreen, then Shift+Tab back to ChatScreen
+        await pilot.press("tab")
+        await pilot.pause()
+        assert isinstance(app.screen, SessionSelectScreen)
+
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert isinstance(app.screen, ChatScreen)
+        top_bar = app.screen.query_one(TopTabBar)
+        assert top_bar.active_tab == "current"
+        assert top_bar.query_one("#tab-current").has_class("active")
+        assert not top_bar.query_one("#tab-sessions").has_class("active")
+
+        # Scenario 2: Multi-hop panel cycling (Tab -> Tab -> Shift-Tab -> Shift-Tab)
+        await pilot.press("tab")
+        await pilot.pause()
+        assert isinstance(app.screen, SessionSelectScreen)
+
+        await pilot.press("tab")
+        await pilot.pause()
+        assert isinstance(app.screen, SkillSelectScreen)
+
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert isinstance(app.screen, SessionSelectScreen)
+
+        # Focus sessions tab item explicitly in SessionSelectScreen
+        app.screen.query_one("#tab-sessions").focus()
+        await pilot.pause()
+
+        # Shift-Tab back to Current tab
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert isinstance(app.screen, ChatScreen)
+        top_bar = app.screen.query_one(TopTabBar)
+        assert top_bar.active_tab == "current"
+        assert top_bar.query_one("#tab-current").has_class("active")
+        assert not top_bar.query_one("#tab-sessions").has_class("active")
+
+
+@pytest.mark.asyncio
+async def test_welcome_banner_anchored_at_top() -> None:
+    """Ensure WelcomeBanner is pinned to the top of the start screen."""
+    app = Agent2App(agent=ReActAgent(name="test", llm=DummyLLM()))
+    async with app.run_test(size=(100, 30)) as pilot:
+        banner = app.screen.query_one(WelcomeBanner)
+        # Directly beneath the 1-line top-nav bar (y=1)
+        assert banner.region.y == 1
+
+
+@pytest.mark.asyncio
+async def test_tab_cycles_candidates_in_completion() -> None:
+    """Ensure Tab cycles candidate options when completion list is visible."""
+    from textual.widgets import OptionList
+
+    app = Agent2App(agent=ReActAgent(name="test", llm=DummyLLM()))
+    async with app.run_test(size=(100, 30)) as pilot:
+        chat_input = app.screen.query_one("#chat-input", ChatInput)
+        chat_input.focus()
+
+        # Type '/' to show completions
+        await pilot.press("slash")
+        await pilot.pause()
+        assert chat_input.show_completion is True
+        completion_list = app.screen.query_one("#completion-list", OptionList)
+        assert completion_list.has_class("visible")
+        assert completion_list.option_count > 1
+        assert completion_list.highlighted == 0
+        assert "❯" in str(completion_list.get_option_at_index(0).prompt)
+
+        # Press Tab: cycles to the next candidate (index 1)
+        await pilot.press("tab")
+        await pilot.pause()
+        assert chat_input.show_completion is True
+        assert completion_list.highlighted == 1
+        assert "❯" in str(completion_list.get_option_at_index(1).prompt)
+        assert "❯" not in str(completion_list.get_option_at_index(0).prompt)
+
+        # Press Shift+Tab: cycles back to candidate 0
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert completion_list.highlighted == 0
+        assert "❯" in str(completion_list.get_option_at_index(0).prompt)
+
+        # Press Enter: accepts candidate 0
+        await pilot.press("enter")
+        await pilot.pause()
+        assert chat_input.show_completion is False
+        assert not completion_list.has_class("visible")
+        assert chat_input.text.startswith("/")
+        assert chat_input.text.endswith(" ")
+
+
+@pytest.mark.asyncio
+async def test_tab_accepts_single_candidate_completion() -> None:
+    """Ensure Tab accepts completion directly when there is only one candidate."""
+    from textual.widgets import OptionList
+
+    app = Agent2App(agent=ReActAgent(name="test", llm=DummyLLM()))
+    async with app.run_test(size=(100, 30)) as pilot:
+        chat_input = app.screen.query_one("#chat-input", ChatInput)
+        chat_input.focus()
+
+        # Type '/plan'
+        for char in "/plan":
+            await pilot.press(char)
+        await pilot.pause()
+
+        completion_list = app.screen.query_one("#completion-list", OptionList)
+        assert completion_list.option_count == 1
+
+        # Press Tab: immediately accepts single candidate
+        await pilot.press("tab")
+        await pilot.pause()
+        assert chat_input.show_completion is False
+        assert chat_input.text == "/plan "
+
+
+@pytest.mark.asyncio
+async def test_tab_switches_panel_when_not_completing() -> None:
+    """Ensure Tab switches top panels when auto-completion is not active."""
+    from agent2.app.tui.screens.session_select import SessionSelectScreen
+
+    app = Agent2App(agent=ReActAgent(name="test", llm=DummyLLM()))
+    async with app.run_test(size=(100, 30)) as pilot:
+        chat_input = app.screen.query_one("#chat-input", ChatInput)
+        chat_input.focus()
+
+        # Normal text (no completion active)
+        chat_input.text = "Hello world"
+        chat_input.cursor_location = (0, 11)
+        await pilot.pause()
+        assert chat_input.show_completion is False
+
+        # Press Tab: switches to Sessions panel
+        await pilot.press("tab")
+        await pilot.pause()
+        assert isinstance(app.screen, SessionSelectScreen)
+        assert app.screen.query_one(TopTabBar).active_tab == "sessions"
+
 

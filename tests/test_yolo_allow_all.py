@@ -198,6 +198,7 @@ async def test_tab_navigation_across_top_buttons_and_panels(tmp_path: Path):
     app = Agent2App(agent=agent, session_manager=empty_sm)
 
     async with app.run_test(size=(100, 30)) as pilot:
+        from agent2.app.tui.screens.model_select import ModelSelectScreen
         from agent2.app.tui.screens.session_select import SessionSelectScreen
         from agent2.app.tui.screens.skill_select import SkillSelectScreen
 
@@ -228,13 +229,13 @@ async def test_tab_navigation_across_top_buttons_and_panels(tmp_path: Path):
         assert app.screen is screen
         assert top_bar.active_tab == "current"
 
-        # 5. Shift+Tab cycles backwards to the Skills panel
+        # 5. Shift+Tab cycles backwards across panels: wraps to Skills panel
         await pilot.press("shift+tab")
         await pilot.pause()
         assert isinstance(app.screen, SkillSelectScreen)
         assert app.screen.query_one(TopTabBar).active_tab == "skills"
 
-        # 6. Shift+Tab again: back to the Sessions panel
+        # 6. Shift+Tab again: back to Sessions panel
         await pilot.press("shift+tab")
         await pilot.pause()
         assert isinstance(app.screen, SessionSelectScreen)
@@ -246,7 +247,7 @@ async def test_tab_navigation_across_top_buttons_and_panels(tmp_path: Path):
         assert app.screen is screen
         assert top_bar.active_tab == "current"
 
-        # 8. Type-to-focus: typing a printable character while on tab-current redirects to chat-input
+        # 7. Type-to-focus: typing a printable character while on tab-current redirects to chat-input
         tab_current.focus()
         await pilot.pause()
         await pilot.press("h")

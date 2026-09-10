@@ -286,14 +286,33 @@ DiffView {
     display: none;
     height: auto;
     max-height: 8;
-    margin: 0;
+    margin: 0 0 1 0;
     padding: 0;
     border: none;
-    background: $panel;
+    background: transparent;
 }
 
 #completion-list.visible {
     display: block;
+}
+
+#completion-list > .option-list--option {
+    padding: 0 1;
+    background: transparent;
+}
+
+#completion-list > .option-list--option-highlighted {
+    background: transparent;
+    color: #f0f6fc;
+}
+
+#completion-list:focus > .option-list--option-highlighted {
+    background: transparent;
+    color: #f0f6fc;
+}
+
+#completion-list > .option-list--option-hover {
+    background: transparent;
 }
 
 #shortcut-help {
@@ -314,19 +333,19 @@ DiffView {
 
 #chat-input {
     height: auto;
-    min-height: 2;
+    min-height: 3;
     max-height: 12;
     margin: 0;
     border: none;
-    border-left: solid $primary;
-    background: $surface;
-    padding: 0 1;
+    border-left: solid #818b98;
+    background: $panel 35%;
+    padding: 1 1;
 }
 
 #chat-input:focus {
     border: none;
-    border-left: solid $primary;
-    background: $surface;
+    border-left: solid #818b98;
+    background: $panel 35%;
 }
 
 

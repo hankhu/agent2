@@ -412,3 +412,30 @@
 
 - **测试**：全量 180 项自动化测试全部通过。
 
+## 37. Tab 补全循环、跨面板导航修复与请求级 TPS/耗时指标 (v0.1.3.18)
+
+- **Tab / Shift+Tab 补全交互重构**（`app/tui/widgets/input_area.py`、`app/tui/screens/chat.py`、`styles.py`）：
+  - 补全浮层可见时，`Tab` 不再切面板：当仅有一个候选直接接受，多候选则环形后移高亮；`Shift+Tab` 反向环形前移；无补全时才回退为切换顶层面板。`ChatInput.CycleTabRequested` 增加 `direction` 参数（`1` / `-1`），`shift+tab` 分支 post `-1`。
+  - 补全候选渲染加 `❯` 高亮前缀与 `#f0f6fc / #c9d1d9 / #8b949e` 配色，`_show_completion` 记录 `_completion_matches`，`_update_completion_prompts()` 依据 `OptionList.highlighted` 用 `replace_option_prompt_at_index` 就地刷新；新增 `on_option_list_option_highlighted` 保持鼠标/键盘高亮同步。
+  - 上游 `ChatScreen` 的 `tab` / `shift+tab` 绑定从 `priority=True` 降为 `priority=False`，确保输入框内的 Tab 补全语义不被截获。
+  - 补全列表样式去重：`option-list--option*` 背景透明，仅保留行内高亮色，避免双层底色。
+
+- **跨面板导航栈查找修复**（`screens/model_select.py`、`screens/session_select.py`、`screens/skill_select.py`、`screens/chat.py`）：
+  - 原实现以 `self.app.screen_stack[-2]` 猜测 ChatScreen，多层模态叠加（如 Model→Sessions→Skills）时索引漂移，导致切换丢失或高亮错位；改为逆序扫描 `screen_stack` 用 `hasattr(s, "_open_*_dialog")` 精准定位宿主 ChatScreen。
+  - 通过 `chat.call_next(getattr(chat, method))` 在 `dismiss()` 之后延后压栈新面板，避免在同一帧内争用屏幕栈。
+  - `ChatScreen._set_active_tab` 同时调用 `top_bar._update_tab_classes(tab_id)`，并新增 `_on_screen_resume` 将顶栏强制同步为 `Current`，保证从任意模态返回后顶栏高亮与实际视图一致。
+
+- **请求级性能与吞吐指标**（`llm/base.py`、`llm/openai.py`、`app/tui/widgets/status_bar.py`、`app/tui/widgets/tool_card.py`、`app/tui/screens/chat.py`）：
+  - `BaseLLM` 新增计时钩子：`_begin_request()` 记录 `_request_started_monotonic` 与 `last_request_started_at`；`_end_request(usage)` 计算 `last_request_duration`、`last_request_finished_at`、累加 `total_generation_time`，并据 `completion_tokens / duration` 得出 `last_tps`（`last_tokens_per_second` 为别名）。重复调用安全，仅首次产出时长。
+  - `OpenAILLM.chat()` / `chat_stream()` 在请求前后自动 `_begin_request()` / `_end_request()` 埋点；流式在 `[...]` 结束后统一结算。
+  - `StatusBar` / `ContextBar` 新增 `tps`、`long_operation` 响应式字段，以及 `session_duration` / `last_operation` 只读别名；渲染时追加 `⏱ 会话时长`、`TPS: n tok/s`，并对 `_busy_since` 计算的操作耗时 ≥ `LONG_OPERATION_SECONDS`(5s) 追加 `, started HH:MM:SS`。
+  - `ChatScreen` 新增 `_reset_session_metrics()`（切会话/新会话时归零计时与 TPS）、`_record_long_operation()`（仅记录 ≥5s 且开始时间不早于上次的操作）、`_update_tps_from_run()` / `_resolve_tps()`（优先 provider 级 `last_tps`，回退按 `total_usage.completion_tokens` 增量 / 墙钟估算）。
+  - `ToolCard` 持有 `_started_at` / `_started_monotonic` / `_duration`，`set_result` 计算耗时，长耗时工具在标题追加 `· 6.3s (started HH:MM:SS)`。
+  - 辅助格式化：`_fmt_duration` / `_fmt_clock` / `_fmt_operation_duration` / `_fmt_tps`，并统一 `max(0.0, seconds)` 防负值。
+
+- **UI 视觉微调**（`styles.py`、`widgets/message_list.py`、`widgets/nav_bar.py`）：
+  - `#chat-input` 最小高度 `2 → 3`、左侧边角色改为 `#818b98`、背景 `$surface → $panel 35%`、内边距 `0 1 → 1 1`。
+  - 移除 `MessageList.on_mount` 的 `anchor(True)`，欢迎横幅顶部锚定（`region.y == 1`）。
+  - 移除 `TabItem.on_focus` 中联动切换 active tab 的行为。
+
+- **测试**（`tests/test_file_completion.py`、`tests/test_tui_layout.py`、`tests/test_yolo_allow_all.py`）：新增 Tab 接受单候选 / 循环候选、Shift+Tab 返回 Current 高亮、WelcomeBanner 顶部锚定、Tab 非补全时切面板等用例；全量 187 项自动化测试全部通过。

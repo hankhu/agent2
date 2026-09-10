@@ -24,7 +24,7 @@ def _fmt_tokens(n: int) -> str:
 
 def _fmt_duration(seconds: float) -> str:
     """Format a duration as ``1h23m`` / ``12m34s`` / ``45s``."""
-    s = int(seconds)
+    s = int(max(0.0, seconds))
     if s >= 3600:
         return f"{s // 3600}h{(s % 3600) // 60:02d}m"
     if s >= 60:
@@ -32,12 +32,37 @@ def _fmt_duration(seconds: float) -> str:
     return f"{s}s"
 
 
+def _fmt_clock(timestamp: float) -> str:
+    """Format a wall-clock timestamp as ``HH:MM:SS``."""
+    return time.strftime("%H:%M:%S", time.localtime(timestamp))
+
+
+def _fmt_operation_duration(seconds: float) -> str:
+    """Format an operation duration with sub-minute precision."""
+    if seconds < 60:
+        return f"{max(0.0, seconds):.1f}s"
+    return _fmt_duration(seconds)
+
+
+def _fmt_tps(tps: float) -> str:
+    """Format a tokens-per-second value compactly."""
+    if tps >= 100:
+        return f"{tps:.0f}"
+    if tps >= 10:
+        return f"{tps:.1f}"
+    return f"{tps:.2f}"
+
+
+# Operations slower than this are highlighted with their duration and start time.
+LONG_OPERATION_SECONDS = 5.0
+
+
 class ContextBar(Static):
     """Context bar situated directly above the chat input box.
 
     Displays:
       - Left: Current working directory (or active tool/spinner if busy)
-      - Right: Session token usage, context ratio, and active model
+      - Right: Session duration, token usage, TPS, context ratio, and active model
     """
 
     SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -53,11 +78,14 @@ class ContextBar(Static):
     context_tokens: reactive[int] = reactive(0)
     context_window: reactive[int] = reactive(0)
     cost: reactive[float] = reactive(0.0)
+    tps: reactive[float] = reactive(0.0)
+    long_operation: reactive[str] = reactive("")
 
     def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(*args, **kwargs)
         self._frame = 0
         self._busy_since: float | None = None
+        self._busy_started_at: float | None = None
         self._spinner_timer = None
         self._session_start = time.monotonic()
         self._clock_timer = None
@@ -70,13 +98,33 @@ class ContextBar(Static):
     def reset_timer(self) -> None:
         self._session_start = time.monotonic()
 
+    @property
+    def session_duration(self) -> float:
+        """Current session wall-clock duration in seconds."""
+        return max(0.0, time.monotonic() - self._session_start)
+
+    @session_duration.setter
+    def session_duration(self, seconds: float) -> None:
+        self._session_start = time.monotonic() - max(0.0, float(seconds))
+
+    @property
+    def last_operation(self) -> str:
+        """Alias for :attr:`long_operation`."""
+        return self.long_operation
+
+    @last_operation.setter
+    def last_operation(self, value: str) -> None:
+        self.long_operation = value
+
     def watch_busy(self, busy: bool) -> None:
         if busy:
             self._busy_since = time.monotonic()
+            self._busy_started_at = time.time()
             if self._spinner_timer is None:
                 self._spinner_timer = self.set_interval(0.1, self._tick_spinner)
         else:
             self._busy_since = None
+            self._busy_started_at = None
             if self._spinner_timer is not None:
                 self._spinner_timer.stop()
                 self._spinner_timer = None
@@ -96,21 +144,39 @@ class ContextBar(Static):
             frame = self.SPINNER_FRAMES[self._frame % len(self.SPINNER_FRAMES)]
             elapsed = ""
             if self._busy_since is not None:
-                elapsed = f" ({time.monotonic() - self._busy_since:.0f}s)"
+                elapsed_seconds = max(0.0, time.monotonic() - self._busy_since)
+                elapsed = f" ({_fmt_operation_duration(elapsed_seconds)}"
+                if (
+                    elapsed_seconds >= LONG_OPERATION_SECONDS
+                    and self._busy_started_at is not None
+                ):
+                    elapsed += f", started {_fmt_clock(self._busy_started_at)}"
+                elapsed += ")"
             label = self.status_text or "Processing…"
             left = f"[cyan]{frame}[/cyan] [bold]{label}[/bold]{elapsed}"
         else:
             p = self.cwd or os.getcwd()
             left = f"[dim]{p}[/dim]"
 
-        # Right side: Session token usage and context
+        # Right side: Slow-operation info, session duration, token usage, TPS, and context
         right_items = []
+        if self.long_operation:
+            right_items.append(f"[cyan]↳[/cyan] {self.long_operation}")
+        session_elapsed = max(0.0, time.monotonic() - self._session_start)
         total_tokens = self.input_tokens + self.output_tokens
         cost_str = f" (${self.cost:.4f})" if self.cost > 0 else ""
         if total_tokens > 0:
-            right_items.append(f"Session: [bold]{_fmt_tokens(total_tokens)}[/bold] tokens{cost_str}")
+            right_items.append(
+                f"Session: [bold]{_fmt_tokens(total_tokens)}[/bold] tokens{cost_str} "
+                f"[dim](⏱ {_fmt_duration(session_elapsed)})[/dim]"
+            )
         else:
-            right_items.append(f"Session: 0 tokens{cost_str}")
+            right_items.append(
+                f"Session: 0 tokens{cost_str} "
+                f"[dim](⏱ {_fmt_duration(session_elapsed)})[/dim]"
+            )
+        if self.tps > 0:
+            right_items.append(f"[dim]TPS:[/dim] [bold]{_fmt_tps(self.tps)}[/bold] [dim]tok/s[/dim]")
 
         if self.context_window and self.context_tokens:
             pct = self.context_tokens * 100 / self.context_window
@@ -147,6 +213,8 @@ class StatusBar(Static):
     context_tokens: reactive[int] = reactive(0)
     context_window: reactive[int] = reactive(0)
     cost: reactive[float] = reactive(0.0)
+    tps: reactive[float] = reactive(0.0)
+    long_operation: reactive[str] = reactive("")
 
     def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(*args, **kwargs)
@@ -161,6 +229,24 @@ class StatusBar(Static):
 
     def reset_timer(self) -> None:
         self._session_start = time.monotonic()
+
+    @property
+    def session_duration(self) -> float:
+        """Current session wall-clock duration in seconds."""
+        return max(0.0, time.monotonic() - self._session_start)
+
+    @session_duration.setter
+    def session_duration(self, seconds: float) -> None:
+        self._session_start = time.monotonic() - max(0.0, float(seconds))
+
+    @property
+    def last_operation(self) -> str:
+        """Alias for :attr:`long_operation`."""
+        return self.long_operation
+
+    @last_operation.setter
+    def last_operation(self, value: str) -> None:
+        self.long_operation = value
 
     def watch_busy(self, busy: bool) -> None:
         if busy:
@@ -205,12 +291,18 @@ class StatusBar(Static):
             mode_badge = "[bold green]AGENT[/bold green]"
 
         badges = [mode_badge]
+        session_elapsed = max(0.0, time.monotonic() - self._session_start)
+        if self.long_operation:
+            badges.append(f"[dim]↳ {self.long_operation}[/dim]")
+        badges.append(f"[dim]session: {_fmt_duration(session_elapsed)}[/dim]")
+        if self.tps > 0:
+            badges.append(f"[dim]TPS:[/dim] [bold]{_fmt_tps(self.tps)}[/bold] [dim]tok/s[/dim]")
         if self.yolo:
             badges.append("[bold red]YOLO[/bold red]")
         elif self.allow_all:
             badges.append("[bold magenta]ALLOW-ALL[/bold magenta]")
 
-        grid.add_row(left, " ".join(badges))
+        grid.add_row(left, "  ".join(badges))
         return grid
 
 

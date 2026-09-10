@@ -60,3 +60,39 @@ def test_process_context_at_file_and_hash_file(tmp_path: Path) -> None:
     # 4. Ordinary email or non-existing mention should remain unchanged
     email_text = "Contact support@example.com or @nonexistent_user"
     assert _process_context(email_text) == email_text
+
+
+@pytest.mark.asyncio
+async def test_tab_accepts_file_completion_in_tui(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "hello.py").write_text("print('hi')", encoding="utf-8")
+
+    from agent2.agent.react import ReActAgent
+    from agent2.app.tui.app import Agent2App
+    from agent2.app.tui.widgets.input_area import ChatInput
+    from agent2.llm.base import BaseLLM
+    from agent2.llm.message import LLMResponse, Message
+    from textual.widgets import OptionList
+
+    class LocalDummyLLM(BaseLLM):
+        def __init__(self) -> None:
+            super().__init__(model="dummy-model")
+
+        async def chat(self, messages, tools=None):
+            return LLMResponse(message=Message.assistant("Dummy reply"))
+
+    app = Agent2App(agent=ReActAgent(name="test", llm=LocalDummyLLM()))
+    async with app.run_test(size=(100, 30)) as pilot:
+        chat_input = app.screen.query_one("#chat-input", ChatInput)
+        chat_input.focus()
+        await pilot.press("@")
+        await pilot.pause()
+        assert chat_input.show_completion is True
+        completion_list = app.screen.query_one("#completion-list", OptionList)
+        assert completion_list.has_class("visible")
+
+        await pilot.press("tab")
+        await pilot.pause()
+        assert chat_input.show_completion is False
+        assert "@hello.py" in chat_input.text
+

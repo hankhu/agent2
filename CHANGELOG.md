@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.1.3.18] - 2026-09-10
+
+### Added
+- **请求级性能与吞吐指标 (TPS / 耗时追踪)**：
+  - `BaseLLM` 新增 `_begin_request()` / `_end_request()` 计时钩子，记录单次请求耗时 `last_request_duration`、开始/结束墙钟时间 `last_request_started_at` / `last_request_finished_at`、累计生成时间 `total_generation_time` 与吞吐 `last_tps`（completion_tokens / 耗时）；`OpenAILLM.chat()` 与 `chat_stream()` 自动埋点。
+  - `StatusBar` / `ContextBar` 新增 `tps` 与 `long_operation` 响应式字段，实时展示会话时长 `⏱ 12m34s`、吞吐 `TPS: 42.1 tok/s`，并对耗时 ≥5s 的慢操作回落显示 `↳ <操作> 6.3s (started HH:MM:SS)`。
+  - `ToolCard` 记录每次工具执行的耗时与墙钟开始时间（`duration` / `started_at`），长耗时操作在卡片标题追加 `· 6.3s (started HH:MM:SS)`。
+
+### Changed
+- **Tab / Shift+Tab 补全交互重构**：
+  - 补全浮层可见时，`Tab` 接受唯一候选、或在多候选间循环切换，`Shift+Tab` 反向循环；浮层不可见时 `Tab` / `Shift+Tab` 仍即时切换顶层面板。
+  - 补全候选新增 `❯` 高亮前缀，随 `OptionList` 高亮变化实时同步（`_update_completion_prompts` / `on_option_list_option_highlighted`）。
+  - `ChatInput.CycleTabRequested` 支持 `direction` 参数（±1），`shift+tab` 触发反向切换；`↑` / `↓` 补全导航改为环形循环。
+- **跨面板导航健壮性**：`Sessions` / `Skills` / `Model` 选择视窗切换时改为逆序扫描 `screen_stack` 定位持有 `_open_*_dialog` 的 `ChatScreen`，并通过 `call_next()` 延后调用，修复多级面板往返（Tab→Tab→Shift+Tab）时目标丢失或顶栏高亮不同步的问题。
+- **`_on_screen_resume` 时强制将顶栏同步回 `Current` 高亮**，`ModelSelectScreen` 内点击 `models` 标签则就地刷新列表。
+- **UI 细节打磨**：`#chat-input` 提升最小高度（3 行）、调整边角色与半透明背景（`$panel 35%`）；补全列表选项背景平铺透明化（`option-list--option*`）；`StatusBar` 徽标改用双空格分隔。
+
+### Fixed
+- 移除 `MessageList.anchor(True)` 强制贴底，欢迎横幅（`WelcomeBanner`）稳定锚定于顶栏正下方。
+- 移除 `TabItem.on_focus` 中聚焦即切换 active tab 的副作用，避免焦点移动误触发面板切换。
+- 计时格式化统一钳制非负值（`max(0.0, seconds)`），防止时钟回退导致负时长显示。
+
 ## [0.1.3.17] - 2026-09-10
 
 ### Added

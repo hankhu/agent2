@@ -322,10 +322,15 @@ class SessionSelectScreen(ModalScreen[str]):
             self._clear_delete_armed()
             self.dismiss("")
         elif event.tab_id == "skills":
-            from agent2.app.tui.screens.skill_select import SkillSelectScreen
+            chat = None
+            for s in reversed(self.app.screen_stack):
+                if hasattr(s, "_open_skills_dialog"):
+                    chat = s
+                    break
             self._clear_delete_armed()
             self.dismiss("")
-            self.app.push_screen(SkillSelectScreen())
+            if chat is not None:
+                chat.call_next(chat._open_skills_dialog)
         elif event.tab_id == "sessions":
             self._clear_delete_armed()
             self._populate_options(self.query_one("#session-search", SessionSearchInput).value)

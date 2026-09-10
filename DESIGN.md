@@ -355,9 +355,19 @@ synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
 ### 4.10 内联快捷键面板与统一面板导航 (Inline Shortcut Help & Panel Navigation)
 
 - **内联帮助取代独立模态**：帮助信息由独立 `HelpScreen` 模态迁移为常驻 `ShortcutHelp` 内联面板（`widgets/shortcut_help.py`），紧贴输入框上方渲染；空输入时 `?` 即时切换显隐，开始输入或切换面板时自动收起。
-- **统一的面板切换语义**：顶栏精简为 `Current` / `Sessions` / `Skills` 三档，`Tab` / `Shift+Tab` 在输入框、消息区与顶栏标签间统一映射为「立即切换上一/下一个顶层面板」，`TopTabBar.cycle_tab(direction)` 双向循环并广播 `TabSelected`。
+- **统一的面板切换语义**：顶栏精简为 `Current` / `Sessions` / `Skills` 三档，`Tab` / `Shift+Tab` 在输入框、消息区与顶栏标签间统一映射为「立即切换上一/下一个顶层面板」，`TopTabBar.cycle_tab(direction)` 双向循环并广播 `TabSelected`；当输入框补全浮层可见时 `Tab` / `Shift+Tab` 改为候选循环（见 4.11）。
 - **状态同步单一来源**：`StatusBar.active_tab` 响应式属性作为当前面板的唯一真源，底部提示行据此渲染 Chat / Sessions / Skills 三套按键提示，避免多组件状态不一致。
 - **两段式破坏性操作确认**：会话删除采用 `Ctrl+X`（armed）→ `X`（confirm）两段式交互，armed 期间任意其它键或 `Esc` 取消，降低误删风险。
+
+---
+
+### 4.11 请求级性能指标与面板导航健壮性 (Request Timing & Panel Navigation Robustness)
+
+- **计时埋点下沉到 LLM 基类**：`BaseLLM` 提供 `_begin_request()` / `_end_request(usage)` 钩子，在抽象层统一维护 `last_request_duration`、`last_request_started_at` / `last_request_finished_at`、`total_generation_time` 与 `last_tps`，子类（`OpenAILLM`）只需在请求前后各调用一次，避免各提供商重复实现；`_end_request` 可重复调用且仅首次结算。
+- **TPS 计算与回退**：优先采用 provider 记录的 `last_tps = completion_tokens / duration`；对不含计时元数据的自定义/测试 LLM，`ChatScreen._update_tps_from_run()` 回退为 `total_usage.completion_tokens` 增量 / 墙钟时长。
+- **慢操作回落 (Long-Operation Fallback)**：以 `LONG_OPERATION_SECONDS = 5.0` 为阈值，`ChatScreen._record_long_operation()` 记录耗时 ≥5s 的工具调用与 LLM 请求，并在 `StatusBar` / `ContextBar` 以 `↳ <操作> 6.3s (started HH:MM:SS)` 呈现；通过 `_last_long_operation_started_at` 去重，仅保留最新一次。
+- **指标生命周期**：`_reset_session_metrics()` 在新建/切换会话时统一归零计时器、TPS 与慢操作读数，避免跨会话指标残留。
+- **面板导航健壮性**：各选择视窗不再以 `screen_stack[-2]` 猜测宿主，而是逆序扫描屏幕栈中持有对应 `_open_*_dialog` 方法的 `ChatScreen`，并以 `call_next()` 延后压栈；`ChatScreen._on_screen_resume` 在任意模态退出后将顶栏高亮复位为 `Current`，保证多层模态往返后视图与顶栏状态一致。
 
 ---
 

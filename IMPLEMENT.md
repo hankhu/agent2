@@ -566,6 +566,27 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 
 ---
 
+### 6.26 Tab 补全循环、跨面板导航查找与请求级耗时/TPS 指标 (`input_area.py` / `screens/chat.py` / `status_bar.py` / `tool_card.py` / `llm/base.py`)
+
+- **Tab / Shift+Tab 补全语义**：
+  - `ChatInput.on_key` 中 `tab` / `shift+tab` 分支：`show_completion` 为真时 post `CompletionKey("tab" / "shift+tab")`，否则 post `CycleTabRequested(1 / -1)`；`CycleTabRequested` 新增 `direction` 字段，`ChatScreen.on_chat_input_cycle_tab_requested` 据此调用 `action_cycle_tab_next/prev`。
+  - `ChatScreen.on_chat_input_completion_key` 对 `tab`：`option_count == 1` 直接 `_accept_completion()`，否则 `highlighted = ((h or 0) + 1) % n`；`shift+tab`：`highlighted = ((h or n) - 1) % n`；`↑` / `↓` 同样改为环形并刷新 prompt。
+  - 补全 prompt 渲染与同步：`_show_completion` 保存 `_completion_matches` 并写入带 `❯` 前缀的首行高亮；`_update_completion_prompts()` 遍历 `replace_option_prompt_at_index(i, prompt)`，由 `on_option_list_option_highlighted` 与各导航分支触发，保证 `❯` 始终跟随 `OptionList.highlighted`。
+- **跨面板导航查找**：
+  - 三类选择视窗（`SessionSelectScreen` / `SkillSelectScreen` / `ModelSelectScreen`）在标签跳转时改为 `for s in reversed(self.app.screen_stack): if hasattr(s, "_open_*_dialog"): chat = s; break`，随后 `self.dismiss(); chat.call_next(getattr(chat, "_open_*_dialog"))`。`call_next` 将压栈推迟到 `dismiss` 生效之后，规避同帧屏幕栈争用。
+  - `ChatScreen._set_active_tab` 显式调用 `TopTabBar._update_tab_classes(tab_id)`；新增 `_on_screen_resume` 在 `super()` 之后强制 `_set_active_tab("current")`。
+- **请求级计时与 TPS**（`llm/base.py` / `llm/openai.py`）：
+  - `_begin_request()` 保存 `_request_started_monotonic = time.monotonic()` 与墙钟 `last_request_started_at`；
+  - `_end_request(usage=None)`：`duration = max(time.monotonic() - started, 1e-9)`，写 `last_request_duration` / `last_request_finished_at`、累加 `total_generation_time`；`effective_usage = usage or self.last_usage`，当 `completion_tokens > 0` 时 `last_tps = completion_tokens / duration`，否则置 `None`；最后清空 `_request_started_monotonic` 防止重复结算。
+  - `OpenAILLM.chat()` 在 `create()` 前 `_begin_request()`、拿到响应 `_record_usage()` 后 `_end_request(llm_response.usage)`；`chat_stream()` 在开始前 `_begin_request()`、流结束后 `_end_request()`（无 usage 时用 `last_usage`/估算值）。
+- **TUI 指标消费**（`screens/chat.py` / `status_bar.py` / `tool_card.py`）：
+  - `ChatScreen` 新增 `_reset_session_metrics()`、`_record_long_operation(name, duration, started_at)`、`_update_tps_from_run(started_monotonic, base)`、`_resolve_tps()`；`_sync_status_bar()` 将 `tps` 广播到 `StatusBar` / `ContextBar`，并在 `llm.last_request_duration ≥ 5s` 时回落 `LLM <model>` 慢操作。
+  - `ContextBar` 渲染右侧新增 `Session: ... (⏱ 时长)` 与 `TPS: n tok/s`；busy 分支的操作耗时改用 `_fmt_operation_duration` 并对 ≥5s 追加 `, started HH:MM:SS`。`StatusBar` 徽标行加入 `↳ 慢操作`、`session: 时长`、`TPS`。
+  - `ToolCard.__init__` 记录 `_started_at` / `_started_monotonic`；`set_result()` 后 `_duration = max(0.0, time.monotonic() - _started_monotonic)`，≥5s 时把 `· {dur} (started {clock})` 追加进 `ToolTitle.label`。`on_tool_call_completed` 读取 `card.duration` / `card.started_at` 交给 `_record_long_operation`。
+  - 辅助函数 `_fmt_duration` / `_fmt_clock` / `_fmt_tps` / `_fmt_operation_duration`，统一 `max(0.0, seconds)` 防负值。
+
+---
+
 ## 7. 异步设计
 
 - **全链路 async/await**：从 `agent.chat()` → `_run_loop()` → `llm.chat()` → `tool.execute()` 全部异步。

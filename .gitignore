@@ -11,3 +11,6 @@ cherrystudio_llm_config.json
 *.key
 *.p12
 *.pfx
+
+# Local agent runtime state (per-project tool approvals)
+.agent2/

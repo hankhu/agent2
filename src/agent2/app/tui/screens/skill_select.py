@@ -206,11 +206,14 @@ class SkillSelectScreen(ModalScreen[str]):
         if event.tab_id == "current":
             self.dismiss("")
         elif event.tab_id == "sessions":
-            chat = self.app.screen_stack[-2] if len(self.app.screen_stack) >= 2 else None
+            chat = None
+            for s in reversed(self.app.screen_stack):
+                if hasattr(s, "_open_sessions_dialog"):
+                    chat = s
+                    break
             self.dismiss("")
-            opener = getattr(chat, "_open_sessions_dialog", None)
-            if opener is not None:
-                opener()
+            if chat is not None:
+                chat.call_next(chat._open_sessions_dialog)
         elif event.tab_id == "skills":
             self._populate_options(self.query_one("#skill-search", SkillSearchInput).value)
 

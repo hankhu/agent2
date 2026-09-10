@@ -22,11 +22,6 @@ class TabItem(Static):
     def on_click(self) -> None:
         self.post_message(TopTabBar.TabSelected(self.tab_id))
 
-    def on_focus(self) -> None:
-        parent = self.parent
-        if isinstance(parent, TopTabBar):
-            parent.active_tab = self.tab_id
-
     def on_key(self, event: events.Key) -> None:
         parent = self.parent
         if event.key == "tab" and isinstance(parent, TopTabBar):

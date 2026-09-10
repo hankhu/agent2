@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from rich.markup import escape
 from rich.table import Table
 from textual import events
@@ -10,6 +12,22 @@ from textual.containers import Vertical
 from textual.widget import Widget
 from textual.widgets import Collapsible, Static
 from textual.widgets._collapsible import CollapsibleTitle
+
+
+LONG_OPERATION_SECONDS = 5.0
+
+
+def _fmt_duration(seconds: float) -> str:
+    s = int(max(0.0, seconds))
+    if s >= 3600:
+        return f"{s // 3600}h{(s % 3600) // 60:02d}m"
+    if s >= 60:
+        return f"{s // 60}m{s % 60:02d}s"
+    return f"{s}s"
+
+
+def _fmt_clock(timestamp: float) -> str:
+    return time.strftime("%H:%M:%S", time.localtime(timestamp))
 
 
 class ToolTitle(CollapsibleTitle):
@@ -103,6 +121,19 @@ class ToolCard(Vertical):
         self._arguments = arguments
         self._initial_result = result
         self._initial_is_error = is_error
+        self._started_at = time.time()
+        self._started_monotonic = time.monotonic()
+        self._duration: float | None = None
+
+    @property
+    def duration(self) -> float | None:
+        """Measured execution duration in seconds (``None`` until completed)."""
+        return self._duration
+
+    @property
+    def started_at(self) -> float:
+        """Wall-clock timestamp when the operation started."""
+        return self._started_at
 
     def _get_operation_text(self) -> str:
         """Extract the formatted operation line."""
@@ -164,6 +195,19 @@ class ToolCard(Vertical):
         collapsible.is_error = is_error
         title = collapsible.query_one(ToolTitle)
         title.running = False
+
+        self._duration = max(0.0, time.monotonic() - self._started_monotonic)
+        if self._duration >= LONG_OPERATION_SECONDS:
+            duration_text = (
+                f"{self._duration:.1f}s"
+                if self._duration < 60
+                else _fmt_duration(self._duration)
+            )
+            timing = (
+                f"[dim]· {duration_text} "
+                f"(started {_fmt_clock(self._started_at)})[/dim]"
+            )
+            title.label = f"{self._get_operation_text()}  {timing}"
         title._update_label()
 
         display = content if len(content) <= 500 else content[:500] + "\n… (truncated)"

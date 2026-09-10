@@ -203,14 +203,19 @@ class ModelSelectScreen(ModalScreen[str]):
         if event.tab_id == "current":
             self.dismiss("")
         elif event.tab_id in ("sessions", "skills"):
-            chat = self.app.screen_stack[-2] if len(self.app.screen_stack) >= 2 else None
-            self.dismiss("")
-            opener_name = (
+            chat = None
+            method_name = (
                 "_open_sessions_dialog" if event.tab_id == "sessions" else "_open_skills_dialog"
             )
-            opener = getattr(chat, opener_name, None)
-            if opener is not None:
-                opener()
+            for s in reversed(self.app.screen_stack):
+                if hasattr(s, method_name):
+                    chat = s
+                    break
+            self.dismiss("")
+            if chat is not None:
+                chat.call_next(getattr(chat, method_name))
+        elif event.tab_id == "models":
+            self._populate_options(self.query_one("#model-search").value)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._populate_options(event.value)

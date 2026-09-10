@@ -157,9 +157,11 @@ class OpenAILLM(BaseLLM):
         oai_messages = [self._to_oai_message(m) for m in self._repair_tool_messages(messages)]
         req = self._build_request(oai_messages, tools=tools, **kwargs)
 
+        self._begin_request()
         response = await client.chat.completions.create(**req)
         llm_response = self._from_oai_response(response)
         self._record_usage(llm_response.usage)
+        self._end_request(llm_response.usage)
         return llm_response
 
     async def chat_stream(
@@ -185,6 +187,7 @@ class OpenAILLM(BaseLLM):
 
         collected_content: list[str] = []
         usage_received = False
+        self._begin_request()
         stream = await client.chat.completions.create(**req)
         async for chunk in stream:
             # Providers that honor stream_options={"include_usage": True} attach
@@ -216,6 +219,7 @@ class OpenAILLM(BaseLLM):
                     total_tokens=est_prompt + est_completion,
                 )
             )
+        self._end_request()
 
     # ── Format conversion ───────────────────────────────────────────
 

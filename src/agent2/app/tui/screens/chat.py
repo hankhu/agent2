@@ -39,7 +39,13 @@ from agent2.app.tui.widgets.message_list import (
 )
 from agent2.app.tui.widgets.nav_bar import TopTabBar
 from agent2.app.tui.widgets.shortcut_help import ShortcutHelp
-from agent2.app.tui.widgets.status_bar import ContextBar, StatusBar
+from agent2.app.tui.widgets.status_bar import (
+    LONG_OPERATION_SECONDS,
+    ContextBar,
+    StatusBar,
+    _fmt_clock,
+    _fmt_operation_duration,
+)
 from agent2.app.tui.widgets.welcome_banner import WelcomeBanner
 
 if TYPE_CHECKING:
@@ -140,8 +146,8 @@ class ChatScreen(Screen):
         Binding("ctrl+c", "interrupt", "Interrupt", priority=True),
         Binding("ctrl+o", "toggle_tool_results", "Toggle Results", priority=True),
         Binding("ctrl+d", "quit_app", "Quit", priority=True),
-        Binding("tab", "cycle_tab_next", "Next Tab", priority=True, show=False),
-        Binding("shift+tab", "cycle_tab_prev", "Previous Tab", priority=True, show=False),
+        Binding("tab", "cycle_tab_next", "Next Tab", priority=False, show=False),
+        Binding("shift+tab", "cycle_tab_prev", "Previous Tab", priority=False, show=False),
         Binding("escape", "cancel_selection", "Cancel Selection", priority=False),
         Binding("question_mark", "toggle_shortcuts", "Shortcuts", show=False),
         Binding("plus", "open_sessions_shortcut", "Sessions", show=False),
@@ -171,10 +177,15 @@ class ChatScreen(Screen):
             self.query_one("#chat-input", ChatInput).focus()
         app: Agent2App = self.app  # type: ignore[assignment]
         self._current_tool_card = None
+        self._current_tool_name: str | None = None
+        self._current_tool_started_at: float | None = None
+        self._current_tool_start_monotonic: float | None = None
         self._thought_start: float | None = None
         self._run_generation = 0
         self._pending_plan: Plan | None = None
         self._plan_goal: str = ""
+        self._tps_estimate: float = 0.0
+        self._last_long_operation_started_at: float = 0.0
         self._sync_status_bar()
 
         # If starting or resuming a session with history, render messages
@@ -190,12 +201,18 @@ class ChatScreen(Screen):
             self.query_one("#messages", MessageList).add_user_message(msg)
             self._run_agent(msg)
 
+    def _on_screen_resume(self, event: events.ScreenResume) -> None:
+        super()._on_screen_resume(event)
+        self._set_active_tab("current")
+
     # ── Tab Navigation ──────────────────────────────────────────
 
     def _set_active_tab(self, tab_id: str) -> None:
         """Keep the top tab bar and the bottom shortcut hint in sync."""
         try:
-            self.query_one(TopTabBar).active_tab = tab_id
+            top_bar = self.query_one(TopTabBar)
+            top_bar.active_tab = tab_id
+            top_bar._update_tab_classes(tab_id)
         except Exception:
             pass
         try:
@@ -213,7 +230,10 @@ class ChatScreen(Screen):
                 pass
 
     def on_chat_input_cycle_tab_requested(self, event: ChatInput.CycleTabRequested) -> None:
-        self.action_cycle_tab_next()
+        if getattr(event, "direction", 1) == -1:
+            self.action_cycle_tab_prev()
+        else:
+            self.action_cycle_tab_next()
 
     def on_chat_input_shortcuts_requested(self, event: ChatInput.ShortcutsRequested) -> None:
         self.action_toggle_shortcuts()
@@ -294,11 +314,7 @@ class ChatScreen(Screen):
             app.load_session(session_id)
             messages.clear_messages()
             self._rebuild_messages()
-            self.query_one(StatusBar).reset_timer()
-            try:
-                self.query_one(ContextBar).reset_timer()
-            except Exception:
-                pass
+            self._reset_session_metrics()
             self._sync_status_bar()
             messages.add_system_message(
                 f"🔄 Session {session_id[:8]} restored."
@@ -346,6 +362,88 @@ class ChatScreen(Screen):
             ctx.status_text = text if busy else ""
         except Exception:
             pass
+
+    # ── Timing / throughput metrics ─────────────────────────────
+
+    def _reset_session_metrics(self) -> None:
+        """Reset session timer, TPS and long-operation readouts."""
+        self._tps_estimate = 0.0
+        self._last_long_operation_started_at = 0.0
+        try:
+            app: Agent2App = self.app  # type: ignore[assignment]
+            llm = app.agent.llm
+            llm.last_tps = None
+            llm.last_request_duration = None
+            llm.last_request_started_at = None
+            llm.last_request_finished_at = None
+            llm._request_started_monotonic = None
+        except Exception:
+            pass
+        for widget_type in (StatusBar, ContextBar):
+            try:
+                widget = self.query_one(widget_type)
+                widget.reset_timer()
+                widget.tps = 0.0
+                widget.long_operation = ""
+            except Exception:
+                pass
+
+    def _record_long_operation(
+        self,
+        name: str,
+        duration: float | None,
+        started_at: float | None = None,
+    ) -> None:
+        """Remember a slow operation's duration and wall-clock start time."""
+        if duration is None or duration < LONG_OPERATION_SECONDS:
+            return
+        if started_at is None:
+            started_at = time.time() - duration
+        if started_at < self._last_long_operation_started_at:
+            return
+        from rich.markup import escape
+
+        self._last_long_operation_started_at = started_at
+        text = (
+            f"{escape(name)} {_fmt_operation_duration(duration)} "
+            f"(started {_fmt_clock(started_at)})"
+        )
+        for widget_type in (ContextBar, StatusBar):
+            try:
+                self.query_one(widget_type).long_operation = text
+            except Exception:
+                pass
+
+    def _update_tps_from_run(
+        self,
+        started_monotonic: float,
+        base_completion_tokens: int = 0,
+    ) -> None:
+        """Estimate tokens-per-second for a completed agent run.
+
+        Prefers the provider-level timing recorded by :class:`BaseLLM`; falls
+        back to completion-token delta divided by wall time when a custom / test
+        LLM does not expose timing metadata.
+        """
+        app: Agent2App = self.app  # type: ignore[assignment]
+        llm = app.agent.llm
+        duration = max(time.monotonic() - started_monotonic, 1e-9)
+        provider_tps = getattr(llm, "last_tps", None)
+        if provider_tps is not None and provider_tps > 0:
+            self._tps_estimate = float(provider_tps)
+        else:
+            total = getattr(llm, "total_usage", None)
+            completion = getattr(total, "completion_tokens", 0) if total else 0
+            delta = max(0, completion - base_completion_tokens)
+            self._tps_estimate = delta / duration if delta else 0.0
+
+    def _resolve_tps(self) -> float:
+        app: Agent2App = self.app  # type: ignore[assignment]
+        llm = app.agent.llm
+        provider_tps = getattr(llm, "last_tps", None)
+        if provider_tps is not None and provider_tps > 0:
+            return float(provider_tps)
+        return max(0.0, float(getattr(self, "_tps_estimate", 0.0) or 0.0))
 
     def _switch_mode(self, new_mode: str) -> None:
         app: Agent2App = self.app  # type: ignore[assignment]
@@ -471,20 +569,48 @@ class ChatScreen(Screen):
     def on_chat_input_completion_key(self, event: ChatInput.CompletionKey) -> None:
         """Handle navigation keys forwarded from ChatInput."""
         completion = self.query_one("#completion-list", OptionList)
-        if event.key in ("tab", "enter"):
+        if event.key == "enter":
             self._accept_completion()
+        elif event.key == "tab":
+            if completion.option_count == 1:
+                self._accept_completion()
+            elif completion.option_count > 1:
+                h = completion.highlighted
+                if h is None:
+                    completion.highlighted = 0
+                else:
+                    completion.highlighted = (h + 1) % completion.option_count
+                self._update_completion_prompts()
+        elif event.key == "shift+tab":
+            if completion.option_count > 0:
+                h = completion.highlighted
+                if h is None:
+                    completion.highlighted = completion.option_count - 1
+                else:
+                    completion.highlighted = (h - 1) % completion.option_count
+                self._update_completion_prompts()
         elif event.key == "down":
-            h = completion.highlighted
-            if h is None:
-                completion.highlighted = 0
-            elif h < completion.option_count - 1:
-                completion.highlighted = h + 1
+            if completion.option_count > 0:
+                h = completion.highlighted
+                if h is None:
+                    completion.highlighted = 0
+                else:
+                    completion.highlighted = (h + 1) % completion.option_count
+                self._update_completion_prompts()
         elif event.key == "up":
-            h = completion.highlighted
-            if h is not None and h > 0:
-                completion.highlighted = h - 1
+            if completion.option_count > 0:
+                h = completion.highlighted
+                if h is None:
+                    completion.highlighted = completion.option_count - 1
+                else:
+                    completion.highlighted = (h - 1) % completion.option_count
+                self._update_completion_prompts()
         elif event.key == "escape":
             self._hide_completion()
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        """Keep ❯ prompt in sync with highlighted option."""
+        self._update_completion_prompts()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle click / Enter on a completion item."""
@@ -495,17 +621,41 @@ class ChatScreen(Screen):
     def _show_completion(self, matches: list[tuple[str, str]]) -> None:
         from rich.markup import escape
 
+        self._completion_matches = matches
         completion = self.query_one("#completion-list", OptionList)
         completion.clear_options()
-        for cmd, desc in matches:
-            completion.add_option(Option(f"{escape(cmd)}  [dim]{escape(desc)}[/dim]", id=cmd))
+        for i, (cmd, desc) in enumerate(matches):
+            is_active = (i == 0)
+            prefix = "[bold #f0f6fc]❯[/bold #f0f6fc] " if is_active else "  "
+            cmd_style = "bold #f0f6fc" if is_active else "#c9d1d9"
+            prompt = f"{prefix}[{cmd_style}]{escape(cmd)}[/{cmd_style}]   [#8b949e]{escape(desc)}[/#8b949e]"
+            completion.add_option(Option(prompt, id=cmd))
         completion.highlighted = 0
         completion.add_class("visible")
         self.query_one("#chat-input", ChatInput).show_completion = True
 
+    def _update_completion_prompts(self) -> None:
+        from rich.markup import escape
+
+        try:
+            completion = self.query_one("#completion-list", OptionList)
+            h = completion.highlighted
+            matches = getattr(self, "_completion_matches", [])
+            for i, (cmd, desc) in enumerate(matches):
+                if i >= completion.option_count:
+                    break
+                is_active = (i == h)
+                prefix = "[bold #f0f6fc]❯[/bold #f0f6fc] " if is_active else "  "
+                cmd_style = "bold #f0f6fc" if is_active else "#c9d1d9"
+                prompt = f"{prefix}[{cmd_style}]{escape(cmd)}[/{cmd_style}]   [#8b949e]{escape(desc)}[/#8b949e]"
+                completion.replace_option_prompt_at_index(i, prompt)
+        except Exception:
+            pass
+
     def _hide_completion(self) -> None:
         completion = self.query_one("#completion-list", OptionList)
         completion.remove_class("visible")
+        self._completion_matches = []
         self.query_one("#chat-input", ChatInput).show_completion = False
 
     def _accept_completion(self, cmd: str | None = None) -> None:
@@ -553,6 +703,11 @@ class ChatScreen(Screen):
         agent = app.agent
         messages = self.query_one("#messages", MessageList)
         status = self.query_one(StatusBar)
+        run_started_monotonic = time.monotonic()
+        total_usage = getattr(agent.llm, "total_usage", None)
+        base_completion_tokens = (
+            getattr(total_usage, "completion_tokens", 0) if total_usage else 0
+        )
 
         # Log user message
         app.session_manager.log_event(app.session_id, "USER", text)
@@ -582,6 +737,7 @@ class ChatScreen(Screen):
             # reads don't delay the user message from appearing.
             processed = await asyncio.to_thread(_process_context, text)
             result = await agent.chat(processed)
+            self._update_tps_from_run(run_started_monotonic, base_completion_tokens)
             messages.add_assistant_message(result, message_index=len(agent._messages) - 1)
             app.session_manager.log_event(app.session_id, "ASSISTANT", result)
         except asyncio.CancelledError:
@@ -611,6 +767,11 @@ class ChatScreen(Screen):
         self._run_generation += 1
         generation = self._run_generation
         self._set_busy(True, "Analyzing intent & planning…")
+        run_started_monotonic = time.monotonic()
+        total_usage = getattr(app.agent.llm, "total_usage", None)
+        base_completion_tokens = (
+            getattr(total_usage, "completion_tokens", 0) if total_usage else 0
+        )
 
         try:
             processed = await asyncio.to_thread(_process_context, user_text)
@@ -621,6 +782,7 @@ class ChatScreen(Screen):
                 existing_plan=existing,
                 feedback=processed if existing else None,
             )
+            self._update_tps_from_run(run_started_monotonic, base_completion_tokens)
             self._pending_plan = plan
             if not self._plan_goal:
                 self._plan_goal = processed
@@ -722,11 +884,17 @@ class ChatScreen(Screen):
 
             # Synthesize final answer from all subtask results
             self._set_busy(True, "Synthesizing final answer…")
+            synth_started_monotonic = time.monotonic()
+            total_usage = getattr(app.agent.llm, "total_usage", None)
+            base_completion_tokens = (
+                getattr(total_usage, "completion_tokens", 0) if total_usage else 0
+            )
             final_answer = await synthesize_plan_results(
                 app.agent.llm,
                 goal=original_goal,
                 task_results=recorded_results,
             )
+            self._update_tps_from_run(synth_started_monotonic, base_completion_tokens)
             app.session_manager.log_event(app.session_id, "FINAL_ANSWER", final_answer)
             if not any(m.role == Role.USER and m.content == original_goal for m in app.agent._messages):
                 app.agent._messages.append(LLMMessage.user(original_goal))
@@ -810,18 +978,37 @@ class ChatScreen(Screen):
 
     def on_tool_call_started(self, event: ToolCallStarted) -> None:
         messages = self.query_one("#messages", MessageList)
+        self._current_tool_name = event.tool_name
+        self._current_tool_started_at = time.time()
+        self._current_tool_start_monotonic = time.monotonic()
         self._current_tool_card = messages.add_tool_card(
             event.tool_name,
             event.arguments,
         )
 
     def on_tool_call_completed(self, event: ToolCallCompleted) -> None:
-        if self._current_tool_card is not None:
-            self._current_tool_card.set_result(
+        card = self._current_tool_card
+        duration: float | None = None
+        started_at: float | None = self._current_tool_started_at
+        if card is not None:
+            card.set_result(
                 event.content, is_error=event.is_error,
             )
             self._current_tool_card = None
             self.query_one("#messages", MessageList)._maybe_scroll_to_bottom()
+            duration = card.duration
+            started_at = card.started_at
+        elif self._current_tool_start_monotonic is not None:
+            duration = time.monotonic() - self._current_tool_start_monotonic
+        if duration is not None:
+            self._record_long_operation(
+                self._current_tool_name or "tool",
+                duration,
+                started_at,
+            )
+        self._current_tool_name = None
+        self._current_tool_started_at = None
+        self._current_tool_start_monotonic = None
         self._set_busy(True, "Processing…")
         self._sync_status_bar()
 
@@ -1067,7 +1254,7 @@ class ChatScreen(Screen):
             self._plan_goal = ""
             messages.clear_messages()
             self._reset_usage()
-            self.query_one(StatusBar).reset_timer()
+            self._reset_session_metrics()
             self._sync_status_bar()
             messages.add_system_message("✨ New session started.")
 
@@ -1225,7 +1412,7 @@ class ChatScreen(Screen):
                 app.load_session(match["id"])
                 messages.clear_messages()
                 self._rebuild_messages()
-                self.query_one(StatusBar).reset_timer()
+                self._reset_session_metrics()
                 self._sync_status_bar()
                 messages.add_system_message(
                     f"🔄 Session {match['id'][:8]} restored."
@@ -1547,15 +1734,21 @@ class ChatScreen(Screen):
         llm = app.agent.llm
         llm.total_usage = Usage()
         llm.last_usage = None
+        self._tps_estimate = 0.0
+        self._last_long_operation_started_at = 0.0
         status = self.query_one(StatusBar)
         status.input_tokens = 0
         status.output_tokens = 0
         status.context_tokens = 0
+        status.tps = 0.0
+        status.long_operation = ""
         try:
             ctx = self.query_one(ContextBar)
             ctx.input_tokens = 0
             ctx.output_tokens = 0
             ctx.context_tokens = 0
+            ctx.tps = 0.0
+            ctx.long_operation = ""
         except Exception:
             pass
 
@@ -1602,6 +1795,8 @@ class ChatScreen(Screen):
         total_cost = getattr(llm, "total_cost", 0.0) or 0.0
         status.cost = total_cost
 
+        tps = self._resolve_tps()
+        status.tps = tps
         if context_bar is not None:
             context_bar.model_name = llm.model
             context_bar.provider = provider_disp
@@ -1610,8 +1805,19 @@ class ChatScreen(Screen):
             context_bar.output_tokens = out_tok
             context_bar.context_tokens = ctx_tok
             context_bar.cost = total_cost
+            context_bar.tps = tps
             context_bar.busy = status.busy
             context_bar.status_text = status.status_text
+
+        # Surface slow provider requests in the duration/start-time readout.
+        last_duration = getattr(llm, "last_request_duration", None)
+        last_started_at = getattr(llm, "last_request_started_at", None)
+        if last_duration is not None and last_started_at is not None:
+            self._record_long_operation(
+                f"LLM {llm.model}",
+                last_duration,
+                last_started_at,
+            )
 
 
 # ── Context injection ───────────────────────────────────────────

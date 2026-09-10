@@ -1,9 +1,8 @@
 """Multi-line chat input with Enter-to-submit / Shift+Enter-for-newline.
 
 Also supports completion navigation: when ``show_completion`` is ``True``,
-Up / Down / Escape are forwarded to the parent screen via
+Up / Down / Escape / Tab are forwarded to the parent screen via
 :class:`CompletionKey` messages instead of being handled by the TextArea.
-The Tab key is reserved for switching top tabs.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ class ChatInput(TextArea):
 
     * **Enter** submits the current text.
     * **Shift+Enter** inserts a newline.
-    * **Tab** switches top tabs immediately.
+    * **Tab** accepts completion when visible.
     * Pasting multi-line text does *not* trigger a submit.
     * When :attr:`show_completion` is ``True``, navigation keys are
       forwarded via :class:`CompletionKey` messages.
@@ -43,6 +42,10 @@ class ChatInput(TextArea):
 
     class CycleTabRequested(Message):
         """Posted when user presses Tab to cycle the top tabs."""
+
+        def __init__(self, direction: int = 1) -> None:
+            super().__init__()
+            self.direction = direction
 
     class ShortcutsRequested(Message):
         """Posted when the user presses ``?`` on an empty input."""
@@ -96,9 +99,21 @@ class ChatInput(TextArea):
             event.stop()
             return
 
-        # ── Tab is reserved exclusively for switching top tabs ──
+        # ── Tab & Shift+Tab handling ────────────────────────────
         if event.key == "tab":
-            self.post_message(self.CycleTabRequested())
+            if self.show_completion:
+                self.post_message(self.CompletionKey("tab"))
+            else:
+                self.post_message(self.CycleTabRequested(1))
+            event.prevent_default()
+            event.stop()
+            return
+
+        if event.key == "shift+tab":
+            if self.show_completion:
+                self.post_message(self.CompletionKey("shift+tab"))
+            else:
+                self.post_message(self.CycleTabRequested(-1))
             event.prevent_default()
             event.stop()
             return

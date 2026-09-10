@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.3.17 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.18 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -12,6 +12,7 @@
 - **计价与成本估算** — `ModelPricing` 内建官方模型费率（USD/1M tokens），自动累计会话请求费用，并在状态栏与模型选择器中清晰呈现。
 - **协议自愈与修复** — `_repair_tool_messages()` 自动校验并补齐缺失的 `tool` 响应消息，确保符合 OpenAI 协议规范。
 - **流式输出** — `chat_stream()` 支持 SSE 逐 token 流式返回。
+- **请求级吞吐与耗时追踪** — `BaseLLM` 内置 `_begin_request()` / `_end_request()` 计时钩子，记录单次请求耗时、开始/结束墙钟时间、累计生成时间与 `last_tps`（tok/s）；`OpenAILLM` 在 `chat()` 与 `chat_stream()` 自动埋点。
 - **统一消息模型** — `Message`（system / user / assistant / tool 四种角色）、`ToolCall`、`ToolResult`、`ToolSchema`、`LLMResponse`、`Usage`，全部基于 Pydantic。
 - **工厂函数** — `create_llm()` 支持三级解析：用户配置文件 → 内置预设 → 直接模型名，含模糊别名匹配。
 
@@ -161,7 +162,7 @@
     - **会话管理视窗 (`SessionSelectScreen` / `/sessions`)** — 全屏极简设计，支持实时关键词过滤搜索、全宽亮蓝高光选框、`↑`/`↓` 键盘导航、`e`/`r` 重命名、`Ctrl+X` 再按 `X` 两段式确认删除且删除后保持选中行位置不变、`Enter` 恢复会话；右侧预览面板展示会话转录并支持按预览内容过滤。
     - **Skills 管理视窗 (`SkillSelectScreen` / `/skills`)** — 全屏选择器，支持技能实时过滤、`↑`/`↓` 导航、`r` 重载、`Enter` 调用；顶栏 `Skills` 标签对应 `F3`。
     - **模型选择视窗 (`ModelSelectScreen` / `/model`)** — 全屏极简设计，提供顶栏联动、模型分组、全宽亮蓝高光条、即打即搜与自定义模型 identifier 直达。
-  - **斜杠命令菜单快速确认** — 输入 `/` 弹出命令自动补全菜单时，按 `Enter` 键直接等同于 `Tab` 键完成补全填充；补全导航使用 `↑`/`↓`，`Tab` 专用于切换顶层面板。
+  - **命令补全与 Tab 智能复用** — 输入 `/`（斜杠命令）或 `@`（文件路径）弹出补全浮层，候选行以 `❯` 高亮标记并随高亮实时同步；`Tab` 在浮层可见时接受唯一候选或循环切换候选、`Shift+Tab` 反向循环，`Enter` 直接接受当前候选，`↑`/`↓` 环形导航，`Esc` 关闭；浮层不可见时 `Tab` / `Shift+Tab` 仍即时切换顶层面板。
   - **即时快捷键** — 空输入框下按 `?` 切换内联快捷键面板、按 `+` 直接打开 Sessions 面板，均无需回车提交。
   - **全扁平极简无边框 UI 风格 (Flat Borderless Design)** — 彻底移除所有界面边框线（`border: none`）与不必要的内衬距/外边距，全屏采用现代无边框贴合、极简色块底色与零间距边缘平铺。
   - **会话快捷重命名 (`/rename`)** — `/rename <new-title>` 快速修改当前会话名称并持久化保存。
@@ -176,6 +177,7 @@
     - 工具卡片标题自动显示操作摘要（shell command 首行 / python 首行 / 文件路径 / web query 等），运行中显示 `⏳` 且禁止折叠。
     - 工具执行结果面板（Result Panel）默认折叠展示（`collapsed=True`），成功结果保持紧凑，错误结果额外显示 `❌ Error` 状态行。
     - 全局快捷键 `Ctrl+O` 一键批量展开 / 收起所有工具执行结果面板。
+  - **会话性能指标 (TPS / 耗时 / 慢操作回落)** — `StatusBar` / `ContextBar` 实时展示会话时长 `⏱`、吞吐 `TPS: n tok/s`，并对耗时 ≥5s 的慢操作显示 `↳ <操作> 6.3s (started HH:MM:SS)`；`ToolCard` 在长耗时工具执行后于标题追加耗时与开始时间。
   - **Token 用量持久化与实时同步** — 会话保存 `usage`；恢复会话、切换模型、Plan 子任务聚合均保留 Token 计数；Thought / Tool 完成事件实时刷新 `ContextBar`，取消或异常时也会同步。
   - **YOLO / Allow-all 模式** — `/yolo` 自动批准所有操作并注入自主决策系统提示；`/allow-all` 仅自动批准；状态栏显示 `YOLO` / `ALLOW-ALL` 徽标。
   - **对话回退与分叉 (`/rewind` / `/fork`)** — `/rewind` 回退最近一轮对话并将用户输入填回输入框；`/fork [title]` 克隆当前完整会话为新 session 继续对话。

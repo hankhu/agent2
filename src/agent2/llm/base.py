@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import time
 from typing import Any, AsyncIterator
 
 from agent2.llm.message import LLMResponse, Message, ToolSchema, Usage
@@ -124,6 +125,14 @@ class BaseLLM(ABC):
         self.total_usage: Usage = Usage()
         self.last_cost: float = 0.0
         self.total_cost: float = 0.0
+
+        # Timing & throughput tracking — updated by subclasses around each request.
+        self.last_request_started_at: float | None = None
+        self.last_request_finished_at: float | None = None
+        self.last_request_duration: float | None = None
+        self.last_tps: float | None = None
+        self.total_generation_time: float = 0.0
+        self._request_started_monotonic: float | None = None
         self._extra = kwargs
 
     def _record_usage(self, usage: Usage | None) -> None:
@@ -135,6 +144,39 @@ class BaseLLM(ABC):
         cost = self.pricing.calculate_cost(usage.prompt_tokens, usage.completion_tokens)
         self.last_cost = cost
         self.total_cost = round(self.total_cost + cost, 6)
+
+    def _begin_request(self) -> None:
+        """Mark the start of an LLM request for duration/TPS measurement."""
+        self._request_started_monotonic = time.monotonic()
+        self.last_request_started_at = time.time()
+        self.last_request_finished_at = None
+
+    def _end_request(self, usage: Usage | None = None) -> None:
+        """Mark the end of an LLM request and compute duration/TPS.
+
+        Safe to call more than once; only the first call after
+        :meth:`_begin_request` produces a duration.
+        """
+        started = self._request_started_monotonic
+        if started is None:
+            return
+        duration = max(time.monotonic() - started, 1e-9)
+        self.last_request_duration = duration
+        self.last_request_finished_at = time.time()
+        self.total_generation_time += duration
+
+        effective_usage = usage if usage is not None else self.last_usage
+        if effective_usage and effective_usage.completion_tokens > 0:
+            self.last_tps = effective_usage.completion_tokens / duration
+        else:
+            self.last_tps = None
+
+        self._request_started_monotonic = None
+
+    @property
+    def last_tokens_per_second(self) -> float | None:
+        """Alias for :attr:`last_tps`."""
+        return self.last_tps
 
     # ── Core interface ──────────────────────────────────────────────
 
