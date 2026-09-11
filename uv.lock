@@ -9,7 +9,7 @@ resolution-markers = [
 
 [[package]]
 name = "agent2"
-version = "0.1.3.17"
+version = "0.1.3.18"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

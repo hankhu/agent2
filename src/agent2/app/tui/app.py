@@ -17,7 +17,7 @@ from agent2.app.chat import get_available_models  # noqa: F401 – re-export con
 from agent2.app.config import get_last_model, load_config, set_last_model
 from agent2.llm import create_llm
 from agent2.llm.base import BaseLLM
-from agent2.llm.message import Message
+from agent2.llm.message import Message, Usage
 from agent2.tools.base import Tool
 from agent2.tools.builtin import file_read, file_write, shell_exec
 from agent2.utils.logging import AgentLogger
@@ -57,6 +57,7 @@ class TUIReActAgent(ReActAgent):
         self.mode = mode
         self.yolo: bool = False
         self.allow_all: bool = False
+        self.mcp_manager: Any = None
 
     def set_yolo(self, enabled: bool) -> None:
         self.yolo = enabled
@@ -113,6 +114,7 @@ class TUIReActAgent(ReActAgent):
         new_agent.mode = self.mode
         new_agent.yolo = self.yolo
         new_agent.allow_all = self.allow_all
+        new_agent.mcp_manager = getattr(self, "mcp_manager", None)
         return new_agent
 
     async def _run_loop(self) -> str:
@@ -392,6 +394,7 @@ class Agent2App(App):  # type: ignore[type-arg]
         self.initial_message = initial_message
         self.mode = mode
         self.context = context  # Context instance for skills lookup
+        self.mcp_manager = getattr(self.agent, "mcp_manager", None)
         if hasattr(self.agent, "set_mode"):
             self.agent.set_mode(mode)
         if resume_session_id:
@@ -399,6 +402,13 @@ class Agent2App(App):  # type: ignore[type-arg]
 
     def on_mount(self) -> None:
         self.push_screen(ChatScreen())
+
+    async def on_unmount(self) -> None:
+        if self.mcp_manager:
+            try:
+                await self.mcp_manager.close()
+            except Exception:
+                pass
 
     # ── public helpers used by ChatScreen ────────────────────────
 
@@ -463,7 +473,9 @@ def build_tui_agent(
     sys_msg = ctx.build_system_prompt(sys_msg)
 
     # ── MCP tools ───────────────────────────────────────────────
-    if cfg.mcp_servers:
+    always_allow_tools: set[str] = set()
+    manager = None
+    if cfg.mcp_servers and not no_tools:
         try:
             from agent2.mcp import MCPManager, MCPServerConfig
 
@@ -472,8 +484,21 @@ def build_tui_agent(
                 for k, v in cfg.mcp_servers.items()
             }
             manager = MCPManager(servers)
-            mcp_tools = asyncio.run(manager.connect())
+            async def _init_mcp_startup() -> list[Any]:
+                discovered = await manager.connect()
+                await manager.close(keep_tools=True)
+                return discovered
+
+            try:
+                asyncio.get_running_loop()
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    mcp_tools = pool.submit(lambda: asyncio.run(_init_mcp_startup())).result()
+            except RuntimeError:
+                mcp_tools = asyncio.run(_init_mcp_startup())
             tools.extend(mcp_tools)
+            always_allow_tools = set(manager.always_allow_tools)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning("MCP init failed: %s", exc)
@@ -487,5 +512,8 @@ def build_tui_agent(
         mode=mode,
         max_iterations=max_iterations,
     )
+    if always_allow_tools:
+        agent._auto_approved.update(always_allow_tools)
     agent.context = ctx  # type: ignore[attr-defined]
+    agent.mcp_manager = manager
     return agent

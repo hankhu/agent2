@@ -525,7 +525,12 @@ def _build_agent(args: argparse.Namespace) -> tuple[ReActAgent, Any]:
                 for k, v in cfg.mcp_servers.items()
             }
             manager = MCPManager(servers)
-            mcp_tools = asyncio.run(manager.connect())
+            async def _init_mcp_startup() -> list[Any]:
+                discovered = await manager.connect()
+                await manager.close(keep_tools=True)
+                return discovered
+
+            mcp_tools = asyncio.run(_init_mcp_startup())
             tools.extend(mcp_tools)
         except Exception as exc:
             import logging
@@ -653,7 +658,15 @@ def _read_user_input() -> str | None:
 
 async def _run_single(agent: ReActAgent, prompt: str) -> None:
     """Single-turn mode: answer the prompt and exit."""
-    await agent.chat(prompt)
+    try:
+        await agent.chat(prompt)
+    finally:
+        mcp_mgr = getattr(agent, "mcp_manager", None)
+        if mcp_mgr:
+            try:
+                await mcp_mgr.close()
+            except Exception:
+                pass
 
 
 async def _run_interactive(

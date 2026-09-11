@@ -439,3 +439,29 @@
   - 移除 `TabItem.on_focus` 中联动切换 active tab 的行为。
 
 - **测试**（`tests/test_file_completion.py`、`tests/test_tui_layout.py`、`tests/test_yolo_allow_all.py`）：新增 Tab 接受单候选 / 循环候选、Shift+Tab 返回 Current 高亮、WelcomeBanner 顶部锚定、Tab 非补全时切面板等用例；全量 187 项自动化测试全部通过。
+
+## 38. MCP 配置增强、/mcp 与 /tools 命令及跨事件循环断连自愈 (v0.1.3.19)
+
+- **MCP 配置扩展与安全持久化**（`src/agent2/mcp.py`、`src/agent2/app/config.py`）：
+  - `MCPServerConfig` 支持 `type` (`"sse"` / `"stdio"`, 智能推断)、`url`、`headers` (如 `Authorization: Bearer ...`)、`disabled` 及 `alwaysAllow` / `always_allow`；支持 `["*"]` 通配所有工具免审批。
+  - `update_mcp_server_disabled(server_name, disabled)`：安全读写 `~/.config/agent2/config.json`，原地持久化服务器启用/禁用状态。
+
+- **跨事件循环生命周期断裂修复与自动重连自愈**（`src/agent2/mcp.py`、`src/agent2/app/tui/app.py`、`src/agent2/app/chat.py`）：
+  - **根因分析**：`build_tui_agent()` / `_build_agent()` 在同步函数内使用 `asyncio.run(manager.connect())` 建立连接。一旦临时 loop 销毁，AnyIO task group 强制退出导致 SSE 传输通道被取消，进入 Textual 的 `app.run()`（新 loop）后调用直接抛出 `Connection closed`，且因 sessions 字典未清空导致状态误判。
+  - **Loop 感知与校验**：`MCPManager` 增加 `_server_loops: dict[str, asyncio.AbstractEventLoop]` 记录连接时的 loop，`is_server_connected()` 严格校验 loop 是否匹配且未 closed。
+  - **委托式调用与自动重连**：MCP `Tool` 的 `_call` 统一调用 `manager.call_tool(server_name, tool_name, kwargs)`；当检测到非当前 loop 或网络断开时，自动在当前活跃 loop 中重新建立连接并自动重试一次。
+  - **启动优雅释放**：`build_tui_agent()` 与 CLI 在启动发现工具后调用 `await manager.close(keep_tools=True)`，优雅退出临时 AnyIO 作用域消除报错，同时完整保留已发现工具的 schema。
+  - **退出清理**：`Agent2App.on_unmount()` 与 `_run_single()` 在 finally 块中调用 `await manager.close()`，保证退出的优雅释放。
+  - **SDK 兼容**：兼容 MCP Python SDK 2.x 的 `input_schema`（以及 1.x 的 `inputSchema`），正确提取参数定义至 `ToolParameter`。
+
+- **TUI `/mcp` 与 `/tools` 命令**（`src/agent2/app/tui/screens/chat.py`）：
+  - `/mcp` 或 `/mcp list`：以表格化树状结构展示已配置的 MCP 服务器状态（`● enabled` / `○ disabled`）、传输类型、URL/命令、激活工具列表及免审批名单。
+  - `/mcp enable <name>`：在当前活跃事件循环中连接 MCP 服务器，将工具注册至 `tool_registry`，更新 `alwaysAllow` 审批白名单，并持久化 `disabled: false`。
+  - `/mcp disable <name>`：断开服务器连接释放资源，从 `tool_registry` 注销工具并持久化 `disabled: true`。
+  - `/tools`：列出当前 Agent 注册的所有本地与 MCP 工具名称及描述。
+  - `ChatScreen.on_mount()` 启动后台 worker `_init_mcp_servers()`，在 Textual 活跃 loop 中异步连接 MCP 服务，消除启动卡顿。
+
+- **测试覆盖**（`tests/test_mcp.py`、`tests/test_tui_modes.py`）：
+  - 新增 `test_update_mcp_server_disabled`、`test_mcp_manager_connect_server_and_disconnect`、`test_mcp_manager_call_tool_auto_reconnect`、`test_tui_mcp_command`、`test_tui_tools_command` 等用例；
+  - 全量 202 项自动化测试全部通过。
+

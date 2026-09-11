@@ -505,12 +505,13 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 - **手写 frontmatter 解析器**：`parse_skill_markdown()` 不依赖 PyYAML，按行解析 `name` / `description`，支持 `>` / `>`- 折叠与 `|` / `|-` 字面量块；无 frontmatter 时从正文首个标题或首行回退。
 - **按需注入与调用**：`Context.build_system_prompt()` 将规则包进 `<rules>`、技能包进 `<skills>`；`Context.get_skill()` 提供大小写不敏感查找；TUI/CLI 通过 `discover_skills()` 实现 `/skills` 与 `/<skill_name>` 动态调用。
 
-### 6.20 MCP 工具桥接与生命周期管理 (`mcp.py`)
+### 6.20 MCP 工具桥接与生命周期管理 (`mcp.py` / `screens/chat.py`)
 
-- **动态导入可选依赖**：`MCPManager.connect()` 内部 `from mcp import ClientSession, StdioServerParameters`，未安装时记录 warning 并返回空工具列表，核心功能不受影响。
-- **手动管理 context manager**：为保持 stdio 连接长期存活，使用 `transport_ctx.__aenter__()` / `session_ctx.__aenter__()`，并把 `__aexit__` 存入 `_cleanup_fns`，`close()` 逆序调用，确保子进程与连接可靠释放。
-- **Schema 与结果转换**：`_make_mcp_tool()` 把 MCP `inputSchema.properties` 转为 `ToolParameter`，用 `Tool.__new__` 构造异步 Tool；`_call()` 合并 MCP 返回的 content blocks 为字符串。
-- **配置接入**：`AppConfig.mcp_servers` 在 `build_tui_agent()` / `_build_agent()` 启动时通过 `MCPServerConfig.model_validate()` 实例化，与内置工具合并注册。
+- **动态导入可选依赖与双协议支持**：`MCPManager.connect()` 内部支持 `stdio` 与 `sse` 双协议客户端，支持自定义 headers 与 URL；未安装 `mcp` 时记录 warning 并优雅降级。
+- **手动管理 context manager 与 Loop 感知**：使用 `transport_ctx.__aenter__()` / `session_ctx.__aenter__()` 持有长期存活 session；记录 `_server_loops`，在 `is_server_connected()` 中校验当前运行 loop，防止跨 loop 调用死锁或 `Connection closed` 异常。
+- **委托式调用与自动重连自愈**：`_make_mcp_tool()` 的 `call_fn` 统一调用 `MCPManager.call_tool()`，执行前若检测未连接或 loop 失效则自动重新连接，遇到网络断开自动重连并重试一次。
+- **配置接入与免审批白名单**：`MCPServerConfig` 支持 `disabled` 启停与 `alwaysAllow` 白名单（支持 `*` 通配所有工具免确认），启动或重载时自动同步至 Agent 的 `_auto_approved` 集合。
+- **优雅启停与 TUI 集成**：`build_tui_agent()` 与 CLI 启动发现工具后调用 `close(keep_tools=True)` 释放临时 transport 并保留 schemas；`ChatScreen.on_mount()` 启动后台 worker 建立活跃 loop 连接；提供 `/mcp` (`list`/`enable`/`disable`) 与 `/tools` 交互命令。
 
 ### 6.21 多级审批作用域与持久化 (`app/approval.py` / `confirm_modal.py`)
 

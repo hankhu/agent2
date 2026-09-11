@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.1.3.19] - 2026-09-12
+
+### Added
+- **MCP 配置字段增强与协议扩展**：
+  - `MCPServerConfig` 支持 `type` (`"sse"` / `"stdio"`，自动推断)、`url`、`headers`、`disabled` 及 `alwaysAllow` / `always_allow`（免审批白名单，支持 `["*"]` 通配）。
+  - `AppConfig` 新增 `update_mcp_server_disabled(server_name, disabled)` 函数，支持线程/进程安全地持久化修改 `~/.config/agent2/config.json`。
+- **TUI `/mcp` 管理命令**：
+  - `/mcp` 或 `/mcp list`：查看所有配置 MCP 服务的运行状态（`● enabled` / `○ disabled`）、传输协议、端点/命令、已激活工具列表与免审批白名单；
+  - `/mcp enable <name>`：在当前活跃事件循环中连接 MCP 服务器，动态注册工具到 `tool_registry`，更新 `alwaysAllow` 权限，并持久化 `disabled: false`；
+  - `/mcp disable <name>`：断开服务器连接并释放传输资源，从 `tool_registry` 注销工具并持久化 `disabled: true`。
+- **TUI `/tools` 工具查看命令**：
+  - 新增 `/tools` 斜杠命令与帮助项，快速查看当前 Agent 已注册的所有本地及 MCP 工具与说明。
+
+### Changed
+- **MCP 工具调用委托化架构**：
+  - MCP `Tool` 的 `call_fn` 不再闭包绑定一次性 `session`，统一委托给 `MCPManager.call_tool(server_name, tool_name, kwargs)`，解耦工具生命周期与底层网络连接。
+
+### Fixed
+- **MCP 跨事件循环生命周期失效与断连自愈**：
+  - 彻底修复启动时 `asyncio.run()` 临时 loop 退出导致 AnyIO task group 取消、SSE 连接被关闭（`Connection closed`）且无法在 TUI 恢复的问题；
+  - `MCPManager` 增加事件循环感知（`_server_loops`），`is_server_connected()` 严格校验当前 loop 状态；
+  - `call_tool()` 在检测到跨 loop 或连接断开时，自动在当前活跃 loop 中建立新连接并重试；
+  - `ChatScreen.on_mount()` 启动后台 worker 在 Textual 活跃 loop 中连接 MCP 服务；
+  - `build_tui_agent()` 与 CLI `_build_agent()` 在初次发现工具后调用 `close(keep_tools=True)`，消除 AnyIO task group 退出异常并保留工具 schema；
+  - `Agent2App.on_unmount()` 与单轮运行 `_run_single()` 退出时优雅清理连接。
+- **MCP 2.x SDK Schema 兼容**：兼容检测 `input_schema` 与 `inputSchema` 属性，确保参数列表正确解析为 `ToolParameter`。
+
 ## [0.1.3.18] - 2026-09-10
 
 ### Added

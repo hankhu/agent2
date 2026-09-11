@@ -561,6 +561,109 @@ async def test_tool_result_panel_collapsed_and_ctrl_o_toggle() -> None:
         assert result_w.collapsed is True
 
 
+@pytest.mark.asyncio
+async def test_tui_mcp_command(monkeypatch, tmp_path) -> None:
+    import json
+    from agent2.app.config import AppConfig
+    from agent2.mcp import _make_mcp_tool
+    from agent2.app.tui.widgets.message_list import MessageList, SystemMessage
+
+    cfg_file = tmp_path / "config.json"
+    data = {
+        "mcp_servers": {
+            "my_srv": {
+                "type": "sse",
+                "url": "https://example.com/sse",
+                "disabled": True,
+                "alwaysAllow": ["mcp_query"],
+            }
+        }
+    }
+    cfg_file.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr("agent2.app.config.CONFIG_FILE", cfg_file)
+
+    app = Agent2App(agent=build_tui_agent())
+    async with app.run_test(size=(100, 30)) as pilot:
+        screen = pilot.app.screen
+        messages = screen.query_one("#messages", MessageList)
+
+        # 1. /mcp list
+        await screen._handle_command("/mcp list")
+        await pilot.pause()
+        sys_msgs = list(messages.query(SystemMessage))
+        assert len(sys_msgs) > 0
+        last_text = str(sys_msgs[-1].render())
+        assert "my_srv" in last_text
+        assert "disabled" in last_text
+
+        # Mock connect_server & disconnect_server on app.mcp_manager
+        mock_tool = _make_mcp_tool("mcp_query", "desc", {}, lambda **kw: "res")
+
+        async def mock_connect(name):
+            app.mcp_manager._server_tools[name] = [mock_tool]
+            app.mcp_manager._server_sessions[name] = object()
+            app.mcp_manager.always_allow_tools.add("mcp_query")
+            return [mock_tool]
+
+        async def mock_disconnect(name):
+            app.mcp_manager._server_tools.pop(name, None)
+            app.mcp_manager._server_sessions.pop(name, None)
+            app.mcp_manager.always_allow_tools.discard("mcp_query")
+            return ["mcp_query"]
+
+        monkeypatch.setattr(app.mcp_manager, "connect_server", mock_connect)
+        monkeypatch.setattr(app.mcp_manager, "disconnect_server", mock_disconnect)
+
+        # 2. /mcp enable my_srv
+        await screen._handle_command("/mcp enable my_srv")
+        await pilot.pause()
+        sys_msgs = list(messages.query(SystemMessage))
+        assert "enabled" in str(sys_msgs[-1].render())
+        assert "mcp_query" in app.agent.tool_registry
+        assert "mcp_query" in app.agent._auto_approved
+
+        # Check config persisted
+        updated = json.loads(cfg_file.read_text())
+        assert updated["mcp_servers"]["my_srv"]["disabled"] is False
+
+        # 3. /mcp disable my_srv
+        await screen._handle_command("/mcp disable my_srv")
+        await pilot.pause()
+        sys_msgs = list(messages.query(SystemMessage))
+        assert "disabled and disconnected" in str(sys_msgs[-1].render())
+        assert "mcp_query" not in app.agent.tool_registry
+        assert "mcp_query" not in app.agent._auto_approved
+
+        # Check config persisted
+        updated = json.loads(cfg_file.read_text())
+        assert updated["mcp_servers"]["my_srv"]["disabled"] is True
+
+
+async def test_tui_tools_command(tmp_path, monkeypatch):
+    """Test /tools command lists registered tools in TUI."""
+    from agent2.app.tui.widgets.message_list import MessageList, SystemMessage
+
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("agent2.app.config.CONFIG_FILE", cfg_file)
+
+    app = Agent2App(agent=build_tui_agent())
+    async with app.run_test(size=(100, 30)) as pilot:
+        screen = pilot.app.screen
+        messages = screen.query_one("#messages", MessageList)
+
+        await screen._handle_command("/tools")
+        await pilot.pause()
+        sys_msgs = list(messages.query(SystemMessage))
+        assert len(sys_msgs) > 0
+        last_text = str(sys_msgs[-1].render())
+        assert "Active Tools" in last_text
+        assert "file_read" in last_text
+
+
+
+
+
 
 
 

@@ -94,7 +94,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 async def _run_single(agent: TUIReActAgent, prompt: str) -> None:
     """Single-turn mode: answer the prompt and exit."""
-    await agent.chat(prompt)
+    try:
+        await agent.chat(prompt)
+    finally:
+        mcp_mgr = getattr(agent, "mcp_manager", None)
+        if mcp_mgr:
+            try:
+                await mcp_mgr.close()
+            except Exception:
+                pass
 
 
 def _print_exit_info(session_id: str, log_path: Path | str | None = None) -> None:

@@ -371,3 +371,30 @@ def load_models() -> dict[str, Any]:
 
     return instances
 
+
+def update_mcp_server_disabled(server_name: str, disabled: bool) -> bool:
+    """Update disabled status of an MCP server in ~/.config/agent2/config.json.
+
+    Returns
+    -------
+    bool
+        True if successfully updated and written, False otherwise.
+    """
+    if not CONFIG_FILE.exists():
+        return False
+    try:
+        raw: dict[str, Any] = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    mcp_servers = raw.get("mcp_servers")
+    if not isinstance(mcp_servers, dict) or server_name not in mcp_servers:
+        return False
+    srv = mcp_servers[server_name]
+    if isinstance(srv, dict):
+        srv["disabled"] = disabled
+    try:
+        CONFIG_FILE.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return True
+    except OSError:
+        return False
+

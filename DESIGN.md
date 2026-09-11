@@ -168,8 +168,9 @@ config.json: mcp_servers
    ToolRegistry / Agent 透明调用
 ```
 
-- **协议适配层**：MCP server 的 `inputSchema` 被转换为 agent2 `ToolSchema`，MCP 返回的 content blocks 合并为字符串结果。
-- **生命周期管理**：`MCPManager` 持有 stdio transport 与 `ClientSession` 的 context manager，`close()` 逆序清理，避免子进程泄漏。
+- **协议适配层**：兼容 MCP 2.x `input_schema` 与 1.x `inputSchema`，自动转换为 agent2 `ToolSchema`；MCP 返回的 content blocks 合并为字符串结果。
+- **委托式调用与自愈**：`Tool` 的 `call_fn` 统一委托到 `MCPManager.call_tool()`，内部感知当前事件循环，遇断连或跨 loop 自动按需建立活跃 session 并重试。
+- **生命周期管理**：`MCPManager` 结构化持有 stdio transport、SSE 客户端与 `ClientSession` 的 cleanups；支持 `close(keep_tools=True)` 在临时 loop 优雅释放网络传输并保留工具元数据，`close()` 逆序完全清理。
 - **可选依赖**：`mcp` 作为 optional dependency，未安装时 MCP 功能静默降级，不影响核心 Agent 运行。
 
 ### 2.10 多级工具审批作用域模式

@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.3.18 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.19 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -211,8 +211,10 @@
 
 ### 8.3 MCP (Model Context Protocol) (`agent2.mcp`)
 
-- `MCPManager` 通过 stdio 连接外部 MCP server，动态发现 tools 并包装为 agent2 `Tool`。
-- `config.json` 的 `mcp_servers` 可配置多个 server（`command` / `args` / `env` / `url`）。
+- `MCPManager` 支持 stdio 与 SSE 双传输协议，动态发现 tools 并包装为 agent2 `Tool`。
+- `config.json` 的 `mcp_servers` 全面支持 `type` (`"sse"` / `"stdio"`)、`url`、`headers`、`command`、`args`、`env`、`disabled` 及 `alwaysAllow` / `always_allow`。
+- **跨事件循环生命周期与自愈**：具有 loop 感知机制，检测到跨事件循环或连接意外断开时自动重连；启动与退出时优雅释放资源。
+- **TUI 管理命令**：`/mcp` (`list` / `enable` / `disable`) 支持实时连接/断开与持久化配置；`/tools` 命令查看当前激活工具。
 - 可选依赖：`uv pip install agent2[mcp]`（`mcp>=1.0`）。
 
 ### 8.4 多级工具审批作用域 (`agent2.app.approval`)

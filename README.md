@@ -77,6 +77,9 @@ uv run -m agent2.app.tui --mode ask   # 以 Ask 只读模式启动
   - 结果汇总：待子任务全部完成后统一聚合结果，生成完整最终回答。
 - **Ask 模式**（`/ask`）：只读问答模式，**严格禁止所有写和执行操作**（禁用 `file_write`、`shell_exec`、`python_exec` 等），仅开放只读与目录查看工具。
 - **Skills**（`/skills`）：浏览、搜索、重载并调用 `SKILL.md` 技能；也可直接使用 `/<skill_name> [prompt]`。
+- **MCP 与工具管理**（`/mcp`、`/tools`）：
+  - `/mcp [list|enable|disable]`：查看所有 MCP 服务状态、实时启用或禁用并持久化配置。
+  - `/tools`：查看当前 Agent 已激活的所有本地与 MCP 工具。
 - **YOLO / Allow-all**（`/yolo`、`/allow-all`）：自动批准所有工具执行；YOLO 模式额外让 LLM 自主决策，无需向用户提问。
 
 > 快捷键：`Tab` / `Shift+Tab` 切换顶层面板（补全浮层可见时改用 `Tab`/`Shift+Tab` 循环候选） · `?` 切换内联快捷键面板 · `+` 打开会话面板 · `Ctrl+O` 展开/收起工具结果 · `Ctrl+C` 中断 · `Ctrl+Z` 挂起至后台 · `Ctrl+D` 保存退出
@@ -94,6 +97,14 @@ Agent2 支持通过用户级配置文件管理服务商凭据与模型别名。�
     "Run tests before reporting success."
   ],
   "mcp_servers": {
+    "remote-sse": {
+      "type": "sse",
+      "url": "https://mcp.example.com/sse",
+      "headers": {
+        "Authorization": "Bearer sk-..."
+      },
+      "alwaysAllow": ["*"]
+    },
     "filesystem": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]

@@ -61,6 +61,8 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/model", "Switch LLM model"),
     ("/models", "Alias for /model"),
     ("/skills", "List available skills (use /<skill_name> to invoke)"),
+    ("/tools", "List currently active tools and descriptions"),
+    ("/mcp", "Manage MCP servers: list, enable, disable (/mcp [list|enable|disable])"),
     ("/clear", "Clear display"),
     ("/compact", "Compact conversation context to free window capacity (/compact [keep_turns])"),
     ("/retry", "Retry last user query / regenerate response"),
@@ -194,12 +196,49 @@ class ChatScreen(Screen):
         else:
             self.query_one("#messages", MessageList).mount(WelcomeBanner(id="welcome-banner"))
 
+        # Proactively connect enabled MCP servers in Textual event loop
+        self.run_worker(self._init_mcp_servers(), exclusive=False)
+
         # Auto-send initial message if provided via -i
         if app.initial_message:
             msg = app.initial_message
             app.initial_message = None  # consume
             self.query_one("#messages", MessageList).add_user_message(msg)
             self._run_agent(msg)
+
+    async def _init_mcp_servers(self) -> None:
+        """Connect enabled MCP servers inside Textual's active event loop."""
+        from agent2.app.config import load_config
+        from agent2.mcp import MCPManager, MCPServerConfig
+
+        app: Agent2App = self.app  # type: ignore[assignment]
+        manager: MCPManager | None = getattr(app, "mcp_manager", None)
+        if manager is None:
+            cfg = load_config()
+            if cfg.mcp_servers:
+                servers = {
+                    k: MCPServerConfig.model_validate(v)
+                    for k, v in cfg.mcp_servers.items()
+                }
+                manager = MCPManager(servers)
+                app.mcp_manager = manager
+                app.agent.mcp_manager = manager  # type: ignore[attr-defined]
+
+        if not manager:
+            return
+
+        try:
+            tools = await manager.connect()
+            for t in tools:
+                if t.name in app.agent.tool_registry:
+                    app.agent.tool_registry.unregister(t.name)
+                app.agent.tool_registry.register(t)
+            if hasattr(app.agent, "_auto_approved"):
+                app.agent._auto_approved.update(manager.always_allow_tools)
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning("MCP background init error: %s", exc)
 
     def _on_screen_resume(self, event: events.ScreenResume) -> None:
         super()._on_screen_resume(event)
@@ -1308,6 +1347,8 @@ class ChatScreen(Screen):
                 "\n[bold cyan]Commands[/bold cyan]\n"
                 "  /model [name]   Switch model\n"
                 "  /skills         List available skills\n"
+                "  /tools          List currently active tools\n"
+                "  /mcp            Manage MCP servers (list, enable, disable)\n"
                 "  /<skill> [msg]  Invoke a skill by name\n"
                 "  /clear          Clear display\n"
                 "  /retry          Retry last query / regenerate response\n"
@@ -1370,6 +1411,21 @@ class ChatScreen(Screen):
                 else:
                     messages.add_system_message(f"Skill '{target}' not found. Type /skills to browse.")
 
+        elif cmd in ("/tools", "/tool"):
+            tools = app.agent.tool_registry.list_tools()
+            if not tools:
+                messages.add_system_message("ℹ️ No tools currently registered.")
+            else:
+                lines = [f"[bold cyan]Active Tools ({len(tools)} registered):[/bold cyan]"]
+                for t in tools:
+                    lines.append(f"\n  • [bold green]{t.name}[/bold green]")
+                    if t.description:
+                        lines.append(f"    [dim]{t.description.strip()}[/dim]")
+                messages.add_system_message("\n".join(lines))
+
+        elif cmd == "/mcp":
+            await self._handle_mcp(arg)
+
         else:
             # ── Dynamic skill invocation: /<skill_name> [prompt] ──
             from agent2.context import discover_skills
@@ -1422,6 +1478,162 @@ class ChatScreen(Screen):
             return
 
         self._open_sessions_dialog()
+
+    async def _handle_mcp(self, arg: str | None) -> None:
+        from agent2.app.config import load_config, update_mcp_server_disabled
+        from agent2.mcp import MCPManager, MCPServerConfig
+
+        app: Agent2App = self.app  # type: ignore[assignment]
+        messages = self.query_one("#messages", MessageList)
+
+        raw_arg = (arg or "").strip()
+        parts = raw_arg.split(maxsplit=1)
+        sub = parts[0].lower() if parts else ""
+        sub_arg = parts[1].strip() if len(parts) > 1 else ""
+
+        # Load configuration
+        cfg = load_config()
+        configured_servers: dict[str, Any] = dict(cfg.mcp_servers)
+
+        # Ensure manager instance
+        manager: MCPManager | None = getattr(app, "mcp_manager", None)
+        if manager is None:
+            servers = {
+                k: MCPServerConfig.model_validate(v)
+                for k, v in configured_servers.items()
+            }
+            manager = MCPManager(servers)
+            app.mcp_manager = manager
+            app.agent.mcp_manager = manager  # type: ignore[attr-defined]
+
+        if not sub or sub == "list":
+            if not configured_servers:
+                messages.add_system_message(
+                    "ℹ️ No MCP servers configured.\n\n"
+                    "Configure servers in [bold]~/.config/agent2/config.json[/bold] under [cyan]\"mcp_servers\"[/cyan]."
+                )
+                return
+
+            lines = [f"[bold cyan]MCP Servers ({len(configured_servers)} configured):[/bold cyan]"]
+            for name, raw_srv in configured_servers.items():
+                srv_cfg = MCPServerConfig.model_validate(raw_srv)
+                is_disabled = srv_cfg.disabled
+                status_badge = "[dim red]○ disabled[/dim red]" if is_disabled else "[bold green]● enabled[/bold green]"
+                proto = srv_cfg.type.upper()
+                lines.append(f"\n  • [bold]{name}[/bold] {status_badge} ({proto})")
+
+                if srv_cfg.type == "stdio":
+                    cmd_str = srv_cfg.command or ""
+                    if srv_cfg.args:
+                        cmd_str += " " + " ".join(srv_cfg.args)
+                    lines.append(f"    [dim]Command:[/dim] {cmd_str}")
+                else:
+                    lines.append(f"    [dim]URL:[/dim] {srv_cfg.url or 'N/A'}")
+                    if srv_cfg.headers:
+                        headers_str = ", ".join(srv_cfg.headers.keys())
+                        lines.append(f"    [dim]Headers:[/dim] {headers_str}")
+
+                tools = manager.get_server_tools(name)
+                if tools:
+                    tool_names = ", ".join(f"[green]{t.name}[/green]" for t in tools)
+                    lines.append(f"    [dim]Active Tools ({len(tools)}):[/dim] {tool_names}")
+                elif not is_disabled:
+                    lines.append("    [dim]Active Tools:[/dim] [dim italic]not connected or no tools discovered[/dim italic]")
+
+                if srv_cfg.always_allow:
+                    allow_str = ", ".join(srv_cfg.always_allow)
+                    lines.append(f"    [dim]Always Allow:[/dim] [yellow]{allow_str}[/yellow]")
+
+            lines.append("\n[bold cyan]Commands:[/bold cyan]")
+            lines.append("  /mcp list               List all MCP servers")
+            lines.append("  /mcp enable <name>      Enable an MCP server and connect")
+            lines.append("  /mcp disable <name>     Disable an MCP server and disconnect")
+            messages.add_system_message("\n".join(lines))
+
+        elif sub == "enable":
+            if not sub_arg:
+                messages.add_system_message("Usage: /mcp enable <server-name>")
+                return
+
+            srv_name = sub_arg
+            matched_key = None
+            for k in configured_servers:
+                if k.lower() == srv_name.lower():
+                    matched_key = k
+                    break
+
+            if not matched_key:
+                messages.add_system_message(
+                    f"❌ MCP server '[bold]{srv_name}[/bold]' not found in ~/.config/agent2/config.json."
+                )
+                return
+
+            srv_cfg = MCPServerConfig.model_validate(configured_servers[matched_key])
+            update_mcp_server_disabled(matched_key, False)
+            srv_cfg.disabled = False
+            manager.servers[matched_key] = srv_cfg
+
+            try:
+                tools = await manager.connect_server(matched_key)
+                for t in tools:
+                    if t.name in app.agent.tool_registry:
+                        app.agent.tool_registry.unregister(t.name)
+                    app.agent.tool_registry.register(t)
+                app.agent._auto_approved.update(manager.always_allow_tools)
+                tool_names = ", ".join(f"[green]{t.name}[/green]" for t in tools) if tools else "none"
+                messages.add_system_message(
+                    f"✅ MCP server '[bold green]{matched_key}[/bold green]' enabled.\n"
+                    f"Discovered {len(tools)} tools: {tool_names}"
+                )
+            except Exception as exc:
+                messages.add_system_message(
+                    f"⚠️ MCP server '[bold]{matched_key}[/bold]' enabled in config, but failed to connect: {exc}"
+                )
+
+        elif sub == "disable":
+            if not sub_arg:
+                messages.add_system_message("Usage: /mcp disable <server-name>")
+                return
+
+            srv_name = sub_arg
+            matched_key = None
+            for k in configured_servers:
+                if k.lower() == srv_name.lower():
+                    matched_key = k
+                    break
+
+            if not matched_key:
+                messages.add_system_message(
+                    f"❌ MCP server '[bold]{srv_name}[/bold]' not found in ~/.config/agent2/config.json."
+                )
+                return
+
+            srv_cfg = MCPServerConfig.model_validate(configured_servers[matched_key])
+            if srv_cfg.disabled and not manager.is_server_connected(matched_key):
+                messages.add_system_message(f"ℹ️ MCP server '[bold]{matched_key}[/bold]' is already disabled.")
+                return
+
+            update_mcp_server_disabled(matched_key, True)
+            srv_cfg.disabled = True
+            manager.servers[matched_key] = srv_cfg
+
+            removed_tools = await manager.disconnect_server(matched_key)
+            for t_name in removed_tools:
+                app.agent.tool_registry.unregister(t_name)
+                app.agent._auto_approved.discard(t_name)
+
+            messages.add_system_message(
+                f"🛑 MCP server '[bold red]{matched_key}[/bold red]' disabled and disconnected. "
+                f"Removed {len(removed_tools)} tools."
+            )
+
+        else:
+            messages.add_system_message(
+                "Usage:\n"
+                "  /mcp list\n"
+                "  /mcp enable <server-name>\n"
+                "  /mcp disable <server-name>"
+            )
 
 
     def _rebuild_messages(self) -> None:
