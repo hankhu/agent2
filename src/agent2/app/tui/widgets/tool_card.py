@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 
 from rich.markup import escape
-from rich.table import Table
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -74,11 +73,7 @@ class ToolTitle(CollapsibleTitle):
         if not hasattr(self, "running"):
             return
         sym = "⏳" if self.running else (self.collapsed_symbol if self.collapsed else self.expanded_symbol)
-        grid = Table.grid(expand=True)
-        grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
-        grid.add_column(justify="right", no_wrap=True)
-        grid.add_row(self.label, sym)
-        self.update(grid)
+        self.update(f"{self.label}  {sym}")
 
 
 class ToolCollapsible(Collapsible):
@@ -137,6 +132,11 @@ class ToolCard(Vertical):
 
     def _get_operation_text(self) -> str:
         """Extract the formatted operation line."""
+        # Friendly display for common tools
+        friendly = self._friendly_operation()
+        if friendly:
+            return friendly
+
         args_display = ", ".join(
             f"{k}={_truncate(repr(v), 80)}" for k, v in self._arguments.items()
         )
@@ -144,6 +144,21 @@ class ToolCard(Vertical):
         if args_display:
             return f"[bold yellow]⚙ {tool_name}[/bold yellow]  [dim]{escape(args_display)}[/dim]"
         return f"[bold yellow]⚙ {tool_name}[/bold yellow]"
+
+    def _friendly_operation(self) -> str | None:
+        """Return a concise one-line label for well-known tools, or ``None``."""
+        name = self._tool_name
+        if name in ("file_read", "read_file"):
+            path = self._arguments.get("path", "")
+            return f"[bold yellow]⚙ Read:[/bold yellow] [dim]{escape(str(path))}[/dim]"
+        if name in ("file_write", "write_file"):
+            path = self._arguments.get("path", "")
+            return f"[bold yellow]⚙ Write:[/bold yellow] [dim]{escape(str(path))}[/dim]"
+        if name == "shell_exec":
+            cmd = self._arguments.get("command", "")
+            first_line = str(cmd).strip().splitlines()[0] if cmd else ""
+            return f"[bold yellow]⚙ Exec:[/bold yellow] [dim]{escape(first_line)}[/dim]"
+        return None
 
     def _get_result_title(self) -> str:
         """Extract a descriptive result title showing the command's first line (backwards compatibility)."""

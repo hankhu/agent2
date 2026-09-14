@@ -76,7 +76,7 @@ async def test_tool_card_collapsible_mount_and_set_result() -> None:
         card.set_result("On branch main\nnothing to commit", is_error=False)
         await pilot.pause()
 
-        assert "shell_exec" in result_w.title
+        assert "Exec:" in result_w.title or "shell_exec" in result_w.title
         assert result_w.collapsed is True
         assert title_w.running is False
         # Success: success|fail+"Result" omitted, no additional line!

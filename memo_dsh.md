@@ -465,3 +465,16 @@
   - 新增 `test_update_mcp_server_disabled`、`test_mcp_manager_connect_server_and_disconnect`、`test_mcp_manager_call_tool_auto_reconnect`、`test_tui_mcp_command`、`test_tui_tools_command` 等用例；
   - 全量 202 项自动化测试全部通过。
 
+
+## 39. 工具调用显示优化与最后回复不折叠 (v0.1.3.20)
+
+- **友好工具标签**（`src/agent2/app/tui/widgets/tool_card.py`）：
+  - `ToolCard._friendly_operation()` 新方法，为 `file_read`/`read_file`、`file_write`/`write_file`、`shell_exec` 三类工具生成简洁的一行标签：`⚙ Read: <path>`、`⚙ Write: <path>`、`⚙ Exec: <command first line>`。
+  - `_get_operation_text()` 优先调用 `_friendly_operation()`，命中则返回友好标签，否则回退到原先的泛化格式。
+  - `ToolTitle._update_label()` 改为内联拼接 `f"{self.label}  {sym}"`，折叠/展开符号紧跟文本，不再使用 `Table.grid(expand=True)` 右对齐。移除 `rich.table.Table` 导入。
+
+- **最后一条回复不折叠**（`src/agent2/app/tui/widgets/message_list.py`、`src/agent2/app/tui/screens/chat.py`）：
+  - `AssistantMessage` 新增 `fold: bool = True` 参数；`_compose_content()` 中 `fold=False` 时直接 `yield Markdown(self._content)` 跳过分段折叠。
+  - `MessageList.add_assistant_message()` 透传 `fold` 参数。
+  - `ChatScreen._run_agent()` 中最后的 `add_assistant_message(result, ..., fold=False)`，实时对话最后一条回复不折叠。
+  - `ChatScreen._rebuild_messages()` 预扫描 `last_assistant_idx`，仅最后一条内容消息 `fold=False`，历史恢复同样保持最后回复展开。

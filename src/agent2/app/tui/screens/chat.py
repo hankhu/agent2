@@ -777,7 +777,7 @@ class ChatScreen(Screen):
             processed = await asyncio.to_thread(_process_context, text)
             result = await agent.chat(processed)
             self._update_tps_from_run(run_started_monotonic, base_completion_tokens)
-            messages.add_assistant_message(result, message_index=len(agent._messages) - 1)
+            messages.add_assistant_message(result, message_index=len(agent._messages) - 1, fold=False)
             app.session_manager.log_event(app.session_id, "ASSISTANT", result)
         except asyncio.CancelledError:
             messages.add_system_message("⛔ Interrupted by user.")
@@ -1645,12 +1645,19 @@ class ChatScreen(Screen):
             if m.role == Role.TOOL and m.tool_result is not None:
                 tool_results[m.tool_result.tool_call_id] = m.tool_result
 
+        # Find the last assistant message with content (to render unfolded)
+        last_assistant_idx: int | None = None
+        for idx, msg in enumerate(app.agent.messages):
+            if msg.role == Role.ASSISTANT and msg.content:
+                last_assistant_idx = idx
+
         for idx, msg in enumerate(app.agent.messages):
             if msg.role == Role.USER:
                 messages.add_user_message(msg.content or "", message_index=idx)
             elif msg.role == Role.ASSISTANT:
+                is_last = (idx == last_assistant_idx)
                 if msg.content:
-                    messages.add_assistant_message(msg.content, message_index=idx)
+                    messages.add_assistant_message(msg.content, message_index=idx, fold=not is_last)
                 if msg.tool_calls:
                     for tc in msg.tool_calls:
                         tr = tool_results.get(tc.id)

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3.20] - 2026-09-15
+
+### Changed
+- **工具调用显示优化**：
+  - `file_read` / `read_file` 显示为 `⚙ Read: <path>`，`file_write` / `write_file` 显示为 `⚙ Write: <path>`，`shell_exec` 显示为 `⚙ Exec: <command first line>`，替代原先的泛化 `⚙ tool_name  args=...` 格式。
+  - 折叠/展开符号（`>` / `v` / `⏳`）紧跟工具标签文本之后，不再右对齐到行尾。
+- **最后一条回复不折叠**：LLM 最后一步的 `AssistantMessage` 始终以完整 Markdown 渲染，不自动折叠代码块和长文本段落；历史消息恢复（`_rebuild_messages`）同样对最后一条回复禁用折叠。
+
 ## [0.1.3.19] - 2026-09-12
 
 ### Added

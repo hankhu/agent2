@@ -110,8 +110,9 @@ class MessageList(ScrollableContainer):
         content: str,
         message_index: int | None = None,
         can_continue: bool = False,
+        fold: bool = True,
     ) -> AssistantMessage:
-        msg = AssistantMessage(content, message_index=message_index, can_continue=can_continue)
+        msg = AssistantMessage(content, message_index=message_index, can_continue=can_continue, fold=fold)
         self.mount(msg)
         self._maybe_scroll_to_bottom()
         return msg
@@ -245,10 +246,12 @@ class AssistantMessage(SelectableMessage):
         content: str,
         message_index: int | None = None,
         can_continue: bool = False,
+        fold: bool = True,
     ) -> None:
         super().__init__(message_index=message_index)
         self._content = content
         self._can_continue = can_continue or _is_max_iterations_content(content)
+        self._fold = fold
 
     def compose(self):  # type: ignore[override]
         yield Static("[bold green]Agent[/bold green]")
@@ -262,6 +265,10 @@ class AssistantMessage(SelectableMessage):
 
     def _compose_content(self):
         """Yield markdown or collapsible widgets for code blocks and large text paragraphs."""
+        if not self._fold:
+            yield Markdown(self._content)
+            return
+
         segments = _split_markdown_segments(self._content)
         if not segments:
             yield Markdown(self._content)
