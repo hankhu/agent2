@@ -142,22 +142,22 @@ class ToolCard(Vertical):
         )
         tool_name = escape(self._tool_name)
         if args_display:
-            return f"[bold yellow]⚙ {tool_name}[/bold yellow]  [dim]{escape(args_display)}[/dim]"
-        return f"[bold yellow]⚙ {tool_name}[/bold yellow]"
+            return f"[#adbac7]⚙ [bold]{tool_name}[/bold][/#adbac7]  [#768390]{escape(args_display)}[/#768390]"
+        return f"[#adbac7]⚙ [bold]{tool_name}[/bold][/#adbac7]"
 
     def _friendly_operation(self) -> str | None:
         """Return a concise one-line label for well-known tools, or ``None``."""
         name = self._tool_name
         if name in ("file_read", "read_file"):
             path = self._arguments.get("path", "")
-            return f"[bold yellow]⚙ /read:[/bold yellow] [dim]{escape(str(path))}[/dim]"
+            return f"[#adbac7]⚙ [bold]read:[/bold][/#adbac7] [#768390]{escape(str(path))}[/#768390]"
         if name in ("file_write", "write_file"):
             path = self._arguments.get("path", "")
-            return f"[bold yellow]⚙ /write:[/bold yellow] [dim]{escape(str(path))}[/dim]"
+            return f"[#adbac7]⚙ [bold]write:[/bold][/#adbac7] [#768390]{escape(str(path))}[/#768390]"
         if name in ("shell_exec", "python_exec"):
             cmd = self._arguments.get("command") or self._arguments.get("code", "")
             first_line = str(cmd).strip().splitlines()[0] if cmd else ""
-            return f"[bold yellow]⚙ /exec:[/bold yellow] [dim]{escape(first_line)}[/dim]"
+            return f"[#adbac7]⚙ [bold]exec:[/bold][/#adbac7] [#768390]{escape(first_line)}[/#768390]"
         return None
 
     def _get_result_title(self) -> str:

@@ -56,19 +56,19 @@ def test_tool_card_result_title_extraction() -> None:
 
 def test_friendly_operation_slash_labels() -> None:
     read_card = ToolCard("file_read", {"path": "src/main.py"})
-    assert "/read:" in read_card._get_operation_text()
+    assert "read:" in read_card._get_operation_text()
     assert "src/main.py" in read_card._get_operation_text()
 
     write_card = ToolCard("file_write", {"path": "src/out.py", "content": "..."})
-    assert "/write:" in write_card._get_operation_text()
+    assert "write:" in write_card._get_operation_text()
     assert "src/out.py" in write_card._get_operation_text()
 
     exec_card = ToolCard("shell_exec", {"command": "ls -la\npwd"})
-    assert "/exec:" in exec_card._get_operation_text()
+    assert "exec:" in exec_card._get_operation_text()
     assert "ls -la" in exec_card._get_operation_text()
 
     py_card = ToolCard("python_exec", {"code": "print(123)\nprint(456)"})
-    assert "/exec:" in py_card._get_operation_text()
+    assert "exec:" in py_card._get_operation_text()
     assert "print(123)" in py_card._get_operation_text()
 
 
@@ -94,7 +94,7 @@ async def test_tool_card_collapsible_mount_and_set_result() -> None:
         card.set_result("On branch main\nnothing to commit", is_error=False)
         await pilot.pause()
 
-        assert "/exec:" in result_w.title or "Exec:" in result_w.title or "shell_exec" in result_w.title
+        assert "exec:" in result_w.title or "Exec:" in result_w.title or "shell_exec" in result_w.title
         assert result_w.collapsed is True
         assert title_w.running is False
         # Success: success|fail+"Result" omitted, no additional line!

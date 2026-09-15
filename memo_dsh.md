@@ -502,3 +502,17 @@
 - **测试覆盖**（`tests/test_tool_result_title.py`、`tests/test_tui_layout.py`、`tests/test_mcp.py`、`tests/test_cfg_command.py`）：
   - 新增斜杠工具标签断言、状态栏 `idle` / `wait for input` 状态断言、Streamable HTTP 客户端模拟握手与降级测试、`/cfg` 命令交互、备份创建与损坏回退测试；
   - 全量 213 项自动化测试全部通过。
+
+## 41. 工具标签去斜杠+亮灰配色、MCP cleanup 跨 task 修复 (v0.1.3.22)
+
+- **工具调用标签视觉优化**（`src/agent2/app/tui/widgets/tool_card.py`、`src/agent2/app/tui/session.py`）：
+  - 去掉 `⚙ /read:` / `⚙ /write:` / `⚙ /exec:` 前缀斜杠，改为 `⚙ read:` / `⚙ write:` / `⚙ exec:`，标签关键词加 `[bold]`。
+  - 整体配色由 `[bold yellow]` + `[dim]` 改为 `[#adbac7]`（亮灰，标签）+ `[#768390]`（暗灰，参数/路径）。
+  - Session 预览界面同步统一风格：加入 exec/read/write 友好名称映射，取代原有 `[dim yellow]⚙ {tc_name} ...` 格式，未命中的通用工具名同样加粗。
+
+- **MCP cleanup 跨 task cancel scope 错误修复**（`src/agent2/mcp.py`）：
+  - 根本原因：anyio cancel scope 要求 `__aexit__` 必须在 `__aenter__` 的同一 asyncio task 中调用；旧代码将 `__aexit__` 存入 `cleanups` 列表后在 `disconnect_server` 里跨 task 调用，触发 "Attempted to exit cancel scope in a different task" 错误。
+  - 新增 `_start_server_task()`：为每个 MCP 服务器启动专属后台 `asyncio.Task`，在该 task 内用 `async with transport_ctx / ClientSession` 持有全部 context manager；通过 `asyncio.Queue(maxsize=1)` 将就绪的 `session` 传回调用方，通过 `asyncio.Event` 接收关断信号。
+  - `disconnect_server` 改为 `shutdown.set()` + `asyncio.wait_for(shield(task), timeout=5)` 等待 task 自然退出，不再直接调用 `__aexit__`。
+  - `MCPManager.__init__` 新增 `_server_tasks` 与 `_server_shutdowns` 字段；`close()` 同步清理这两个字典。
+  - 三个 `_connect_*` 方法统一收敛为 `_start_server_task()` 一行调用，代码量大幅减少。

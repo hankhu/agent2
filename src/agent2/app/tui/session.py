@@ -336,12 +336,29 @@ class SessionManager:
                     lines.append(f"[bold green]🤖 Assistant:[/bold green]\n{snippet}\n")
                 tool_calls = m.get("tool_calls", [])
                 for tc in tool_calls:
-                    tc_name = escape(str(tc.get("name", "tool")))
+                    raw_name = str(tc.get("name", "tool"))
                     args = tc.get("arguments", {})
-                    args_str = " ".join(f"{k}={repr(v)}" for k, v in args.items())
-                    if len(args_str) > 60:
-                        args_str = args_str[:57] + "…"
-                    lines.append(f"[dim yellow]⚙ {tc_name} {escape(args_str)}[/dim yellow]\n")
+                    # Friendly label mapping
+                    if raw_name in ("file_read", "read_file"):
+                        label = "[bold]read:[/bold]"
+                        detail = escape(str(args.get("path", "")))
+                    elif raw_name in ("file_write", "write_file"):
+                        label = "[bold]write:[/bold]"
+                        detail = escape(str(args.get("path", "")))
+                    elif raw_name in ("shell_exec", "python_exec"):
+                        label = "[bold]exec:[/bold]"
+                        cmd = args.get("command") or args.get("code", "")
+                        first_line = str(cmd).strip().splitlines()[0] if cmd else ""
+                        if len(first_line) > 60:
+                            first_line = first_line[:57] + "…"
+                        detail = escape(first_line)
+                    else:
+                        args_str = " ".join(f"{k}={repr(v)}" for k, v in args.items())
+                        if len(args_str) > 60:
+                            args_str = args_str[:57] + "…"
+                        label = f"[bold]{escape(raw_name)}[/bold]"
+                        detail = escape(args_str)
+                    lines.append(f"[#adbac7]⚙ {label}[/#adbac7] [#768390]{detail}[/#768390]\n")
             elif role == "tool":
                 tr = m.get("tool_result", {})
                 tr_content = (tr.get("content") or "").strip()

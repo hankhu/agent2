@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.3.22] - 2026-09-16
+
+### Changed
+- **工具调用显示去斜杠 + 亮灰配色**：
+  - 工具操作标签由 `⚙ /read:` / `⚙ /write:` / `⚙ /exec:` 去掉前缀 `/`，改为 `⚙ **read:**` / `⚙ **write:**` / `⚙ **exec:**`，标签关键词加粗。
+  - 整体配色由 `bold yellow` + `dim` 改为亮灰 `#adbac7`（标签）+ `#768390`（参数/路径），视觉上更柔和低调。
+  - Session 预览界面（`session.py`）同步应用相同风格与友好名称映射，取代原有 `dim yellow` 样式。
+
+### Fixed
+- **MCP cleanup 跨 task cancel scope 错误**：
+  - 重构 `_connect_stdio` / `_connect_sse` / `_connect_http` 为通用 `_start_server_task()`：每个 MCP 服务器在专属后台 `asyncio.Task` 中通过 `async with` 持有 transport + session context manager，用 `asyncio.Queue` 传递就绪 session、用 `asyncio.Event` 接收关断信号。
+  - `disconnect_server` 改为 `shutdown.set()` + `await task`，不再跨 task 调用 `__aexit__`，彻底消除 "Attempted to exit cancel scope in a different task" 错误。
+
 ## [0.1.3.21] - 2026-09-15
 
 ### Added

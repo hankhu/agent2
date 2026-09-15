@@ -146,9 +146,11 @@ class MCPManager:
     def __init__(self, servers: dict[str, MCPServerConfig]) -> None:
         self._server_configs = servers
         self._server_sessions: dict[str, Any] = {}
-        self._server_cleanups: dict[str, list[Any]] = {}
+        self._server_cleanups: dict[str, list[Any]] = {}  # legacy, kept for compat
         self._server_tools: dict[str, list[Any]] = {}
         self._server_loops: dict[str, Any] = {}
+        self._server_tasks: dict[str, asyncio.Task[None]] = {}
+        self._server_shutdowns: dict[str, asyncio.Event] = {}
         self.always_allow_tools: set[str] = set()
 
     @property
@@ -339,19 +341,26 @@ class MCPManager:
     ) -> list[str]:
         """Disconnect a single server and return the names of removed tools."""
         self._server_loops.pop(server_name, None)
-        cleanups = self._server_cleanups.pop(server_name, [])
+        self._server_cleanups.pop(server_name, None)  # legacy
         self._server_sessions.pop(server_name, None)
+
+        shutdown = self._server_shutdowns.pop(server_name, None)
+        task = self._server_tasks.pop(server_name, None)
+
+        if shutdown is not None:
+            shutdown.set()
+        if task is not None and not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as exc:
+                _log.warning("MCP cleanup error for '%s': %s", server_name, exc)
+                task.cancel()
+
         if keep_tools:
             tools = self._server_tools.get(server_name, [])
         else:
             tools = self._server_tools.pop(server_name, [])
         tool_names = [t.name for t in tools]
-
-        for cleanup in reversed(cleanups):
-            try:
-                await cleanup(None, None, None)
-            except BaseException as exc:
-                _log.warning("MCP cleanup error for '%s': %s", server_name, exc)
 
         if not keep_tools:
             for t_name in tool_names:
@@ -396,6 +405,56 @@ class MCPManager:
             tools.append(tool)
         return tools
 
+    async def _start_server_task(
+        self,
+        server_name: str,
+        transport_ctx: Any,
+        ClientSession: type,
+    ) -> list[Any]:
+        """Spawn a background task that holds the transport + session open.
+
+        The task uses an ``asyncio.Queue`` to hand the live session back to the
+        caller once both context managers have been entered, then blocks on a
+        shutdown ``asyncio.Event``.  This ensures that ``__aexit__`` is always
+        called from the *same* task as ``__aenter__``, which is required by
+        anyio cancel scopes.
+        """
+        ready: asyncio.Queue[tuple[str, Any]] = asyncio.Queue(maxsize=1)
+        shutdown: asyncio.Event = asyncio.Event()
+
+        async def _task() -> None:
+            try:
+                async with transport_ctx as transport:
+                    read_stream, write_stream = transport
+                    async with ClientSession(read_stream, write_stream) as session:
+                        ready.put_nowait(("ok", session))
+                        await shutdown.wait()
+            except BaseException as exc:
+                try:
+                    ready.put_nowait(("err", exc))
+                except asyncio.QueueFull:
+                    pass
+
+        task: asyncio.Task[None] = asyncio.create_task(
+            _task(), name=f"mcp-{server_name}"
+        )
+        kind, value = await ready.get()
+        if kind == "err":
+            # Let the task finish its (failed) cleanup before propagating.
+            with __import__("contextlib").suppress(Exception):
+                await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+            raise value  # type: ignore[misc]
+
+        session = value
+        self._server_sessions[server_name] = session
+        self._server_tasks[server_name] = task
+        self._server_shutdowns[server_name] = shutdown
+        try:
+            self._server_loops[server_name] = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        return await self._discover_tools(server_name, session)
+
     async def _connect_stdio(
         self,
         server_name: str,
@@ -417,35 +476,9 @@ class MCPManager:
             args=cfg.args,
             env=env,
         )
-
-        transport_ctx = stdio_client(server_params)
-        transport = await transport_ctx.__aenter__()
-        cleanups: list[Any] = [transport_ctx.__aexit__]
-        try:
-            read_stream, write_stream = transport
-            session_ctx = ClientSession(read_stream, write_stream)
-            session = await session_ctx.__aenter__()
-            cleanups.append(session_ctx.__aexit__)
-            self._server_cleanups[server_name] = cleanups
-            self._server_sessions[server_name] = session
-            try:
-                import asyncio
-
-                self._server_loops[server_name] = asyncio.get_running_loop()
-            except RuntimeError:
-                pass
-
-            return await self._discover_tools(server_name, session)
-        except BaseException:
-            self._server_sessions.pop(server_name, None)
-            self._server_cleanups.pop(server_name, None)
-            self._server_loops.pop(server_name, None)
-            for cl in reversed(cleanups):
-                try:
-                    await cl(None, None, None)
-                except BaseException:
-                    pass
-            raise
+        return await self._start_server_task(
+            server_name, stdio_client(server_params), ClientSession
+        )
 
     async def _connect_sse(
         self,
@@ -460,33 +493,7 @@ class MCPManager:
             return []
 
         transport_ctx = sse_client(cfg.url, headers=cfg.headers or None)
-        transport = await transport_ctx.__aenter__()
-        cleanups: list[Any] = [transport_ctx.__aexit__]
-        try:
-            read_stream, write_stream = transport
-            session_ctx = ClientSession(read_stream, write_stream)
-            session = await session_ctx.__aenter__()
-            cleanups.append(session_ctx.__aexit__)
-            self._server_cleanups[server_name] = cleanups
-            self._server_sessions[server_name] = session
-            try:
-                import asyncio
-
-                self._server_loops[server_name] = asyncio.get_running_loop()
-            except RuntimeError:
-                pass
-
-            return await self._discover_tools(server_name, session)
-        except BaseException:
-            self._server_sessions.pop(server_name, None)
-            self._server_cleanups.pop(server_name, None)
-            self._server_loops.pop(server_name, None)
-            for cl in reversed(cleanups):
-                try:
-                    await cl(None, None, None)
-                except BaseException:
-                    pass
-            raise
+        return await self._start_server_task(server_name, transport_ctx, ClientSession)
 
     async def _connect_http(
         self,
@@ -507,33 +514,7 @@ class MCPManager:
         else:
             transport_ctx = streamable_http_client(cfg.url)
 
-        transport = await transport_ctx.__aenter__()
-        cleanups: list[Any] = [transport_ctx.__aexit__]
-        try:
-            read_stream, write_stream = transport
-            session_ctx = ClientSession(read_stream, write_stream)
-            session = await session_ctx.__aenter__()
-            cleanups.append(session_ctx.__aexit__)
-            self._server_cleanups[server_name] = cleanups
-            self._server_sessions[server_name] = session
-            try:
-                import asyncio
-
-                self._server_loops[server_name] = asyncio.get_running_loop()
-            except RuntimeError:
-                pass
-
-            return await self._discover_tools(server_name, session)
-        except BaseException:
-            self._server_sessions.pop(server_name, None)
-            self._server_cleanups.pop(server_name, None)
-            self._server_loops.pop(server_name, None)
-            for cl in reversed(cleanups):
-                try:
-                    await cl(None, None, None)
-                except BaseException:
-                    pass
-            raise
+        return await self._start_server_task(server_name, transport_ctx, ClientSession)
 
     async def close(self, keep_tools: bool = False) -> None:
         """Disconnect from all MCP servers."""
@@ -542,6 +523,9 @@ class MCPManager:
         self._server_cleanups.clear()
         self._server_sessions.clear()
         self._server_loops.clear()
+        self._server_tasks.clear()
+        self._server_shutdowns.clear()
         if not keep_tools:
             self._server_tools.clear()
+
             self.always_allow_tools.clear()
