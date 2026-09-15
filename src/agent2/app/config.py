@@ -301,7 +301,95 @@ class AppConfig(BaseModel):
 
 CONFIG_DIR = Path.home() / ".config" / "agent2"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+CONFIG_BACKUP_FILE = CONFIG_DIR / "config.json.backup"
 LAST_MODEL_FILE = CONFIG_DIR / "last_model"
+
+
+def backup_config() -> bool:
+    """Backup config.json to config.json.backup.
+
+    Returns True if backup was created, False otherwise.
+    """
+    if not CONFIG_FILE.exists():
+        return False
+    try:
+        CONFIG_BACKUP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        import shutil
+
+        shutil.copy2(CONFIG_FILE, CONFIG_BACKUP_FILE)
+        return True
+    except OSError as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to backup %s to %s: %s", CONFIG_FILE, CONFIG_BACKUP_FILE, exc
+        )
+        return False
+
+
+def get_system_editor() -> list[str]:
+    """Return command arguments to launch the system editor."""
+    import os
+    import shlex
+    import shutil
+    import sys
+
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if editor:
+        return shlex.split(editor)
+
+    if sys.platform == "win32":
+        return ["notepad"]
+
+    for candidate in ("nano", "vim", "vi"):
+        if shutil.which(candidate):
+            return [candidate]
+
+    if sys.platform == "darwin":
+        return ["open", "-t"]
+
+    return ["vi"]
+
+
+def prepare_and_backup_config() -> tuple[bool, str]:
+    """Ensure config.json exists, and backup to config.json.backup.
+
+    Returns (backed_up: bool, path_str: str).
+    """
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if not CONFIG_FILE.exists():
+        template = {
+            "default": "gpt-4o-mini",
+            "providers": {},
+            "models": {},
+        }
+        try:
+            CONFIG_FILE.write_text(
+                json.dumps(template, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    backed_up = backup_config()
+    return backed_up, str(CONFIG_FILE)
+
+
+def validate_after_edit() -> tuple[bool, str]:
+    """Validate config.json after editing; refresh backup if valid."""
+    try:
+        raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        AppConfig.model_validate(raw)
+        backup_config()
+        return (
+            True,
+            f"Configuration updated successfully (backed up to {CONFIG_BACKUP_FILE.name}).",
+        )
+    except Exception as exc:
+        return (
+            False,
+            f"Error in {CONFIG_FILE.name}: {exc}. Fallback to {CONFIG_BACKUP_FILE.name}.",
+        )
 
 
 def get_last_model() -> str | None:
@@ -327,16 +415,47 @@ def set_last_model(model: str) -> None:
 def load_config() -> AppConfig:
     """Load configuration from ``~/.config/agent2/config.json``.
 
-    Returns a default :class:`AppConfig` when the file does not exist or
-    is invalid JSON.
+    Catches exceptions when reading ``config.json`` and falls back to
+    ``config.json.backup`` if available. Returns default :class:`AppConfig`
+    when neither exists or both are invalid.
     """
+    import logging
+
+    _log = logging.getLogger(__name__)
+
     if not CONFIG_FILE.exists():
+        if CONFIG_BACKUP_FILE.exists():
+            try:
+                raw = json.loads(CONFIG_BACKUP_FILE.read_text(encoding="utf-8"))
+                return AppConfig.model_validate(raw)
+            except Exception as exc:
+                _log.warning(
+                    "Failed to load backup config %s: %s", CONFIG_BACKUP_FILE, exc
+                )
         return AppConfig()
 
     try:
         raw: dict[str, Any] = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         return AppConfig.model_validate(raw)
-    except (json.JSONDecodeError, Exception):
+    except Exception as exc:
+        _log.warning(
+            "Error reading config from %s: %s. Using backup %s.",
+            CONFIG_FILE,
+            exc,
+            CONFIG_BACKUP_FILE,
+        )
+        if CONFIG_BACKUP_FILE.exists():
+            try:
+                backup_raw: dict[str, Any] = json.loads(
+                    CONFIG_BACKUP_FILE.read_text(encoding="utf-8")
+                )
+                return AppConfig.model_validate(backup_raw)
+            except Exception as backup_exc:
+                _log.warning(
+                    "Error reading backup config from %s: %s. Using default config.",
+                    CONFIG_BACKUP_FILE,
+                    backup_exc,
+                )
         return AppConfig()
 
 
@@ -380,11 +499,18 @@ def update_mcp_server_disabled(server_name: str, disabled: bool) -> bool:
     bool
         True if successfully updated and written, False otherwise.
     """
-    if not CONFIG_FILE.exists():
-        return False
-    try:
-        raw: dict[str, Any] = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    except Exception:
+    raw: dict[str, Any] | None = None
+    if CONFIG_FILE.exists():
+        try:
+            raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    if raw is None and CONFIG_BACKUP_FILE.exists():
+        try:
+            raw = json.loads(CONFIG_BACKUP_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    if raw is None:
         return False
     mcp_servers = raw.get("mcp_servers")
     if not isinstance(mcp_servers, dict) or server_name not in mcp_servers:
@@ -393,7 +519,11 @@ def update_mcp_server_disabled(server_name: str, disabled: bool) -> bool:
     if isinstance(srv, dict):
         srv["disabled"] = disabled
     try:
-        CONFIG_FILE.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        backup_config()
+        CONFIG_FILE.write_text(
+            json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        backup_config()
         return True
     except OSError:
         return False

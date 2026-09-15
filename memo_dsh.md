@@ -478,3 +478,27 @@
   - `MessageList.add_assistant_message()` 透传 `fold` 参数。
   - `ChatScreen._run_agent()` 中最后的 `add_assistant_message(result, ..., fold=False)`，实时对话最后一条回复不折叠。
   - `ChatScreen._rebuild_messages()` 预扫描 `last_assistant_idx`，仅最后一条内容消息 `fold=False`，历史恢复同样保持最后回复展开。
+
+## 40. 状态精细化、MCP HTTP 支持与 /cfg 配置管理与备份容灾 (v0.1.3.21)
+
+- **状态栏状态精细化与工具标签前缀**（`src/agent2/app/tui/widgets/status_bar.py`、`src/agent2/app/tui/widgets/tool_card.py`、`src/agent2/app/tui/screens/chat.py`）：
+  - `StatusBar` 与 `ContextBar` 新增 `status_state` 响应式属性：LLM 正常输出完毕无待办时显示 `idle`；当暂停等待确认（Approve 弹窗）、Plan 计划确认、或 LLM 提问等待回复时，统一显示 `wait for input`。
+  - 工具操作标签重构：由原有的 `⚙ Read:`、`⚙ Write:`、`⚙ Exec:` 调整为 `⚙ /read:`、`⚙ /write:`、`⚙ /exec:`。
+  - 修复卡片标题点击事件冒泡：`ToolTitle._on_click` 调用 `event.prevent_default()` 阻断基类重复触发，彻底解决单击卡片标题导致双次切换无法展开的问题。
+
+- **MCP HTTP (Streamable HTTP) 原生支持**（`src/agent2/mcp.py`）：
+  - `MCPServerConfig` 支持 `type: "http"` 及 `type: "streamable_http"`；
+  - 新增 `_connect_http` 使用 MCP 官方 `streamable_http_client` 与 `create_mcp_http_client` 建立连接，并支持自定义 `headers`；
+  - 向后兼容：`type: "sse"` 发生异常时自动降级回退尝试 Streamable HTTP 协议；
+  - 完善 AnyIO 异步任务异常回收：在当前 task 中立即退出 cancel scope 并清理 cleanups，防止跨 task 作用域释放引发 RuntimeError。
+  - 测试隔离：TUI 后台 `_init_mcp_servers()` 检测到 pytest 运行环境时跳过全局配置加载，避免测试阻塞。
+
+- **配置管理命令 `/cfg`、自动备份与异常容灾回退**（`src/agent2/app/config.py`、`src/agent2/app/tui/screens/chat.py`、`src/agent2/app/chat.py`、`src/agent2/app/tui/screens/help.py`）：
+  - 新增 `/cfg`（及别名 `/config`）斜杠命令：在 TUI（通过 `with app.suspend():`）及 CLI 模式下唤起系统编辑器（`$VISUAL` / `$EDITOR` 或 `nano`/`vim`/`vi`/`notepad`）直接编辑 `~/.config/agent2/config.json`；
+  - 编辑前自动创建 `config.json.backup` 备份文件；保存退出后执行 JSON 与 Schema 校验，合法时自动刷新最新备份；
+  - `load_config()` 全局捕获读取异常，当 `config.json` 语法错误或解析异常时，自动安全回退加载 `config.json.backup` 作为活跃配置，杜绝配置丢失与应用崩溃。
+  - 在 `SLASH_COMMANDS`、命令补全与帮助界面接入 `/cfg`。
+
+- **测试覆盖**（`tests/test_tool_result_title.py`、`tests/test_tui_layout.py`、`tests/test_mcp.py`、`tests/test_cfg_command.py`）：
+  - 新增斜杠工具标签断言、状态栏 `idle` / `wait for input` 状态断言、Streamable HTTP 客户端模拟握手与降级测试、`/cfg` 命令交互、备份创建与损坏回退测试；
+  - 全量 213 项自动化测试全部通过。

@@ -38,17 +38,17 @@ class MCPServerConfig(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    type: Literal["sse", "stdio"] = Field(
+    type: Literal["sse", "stdio", "http", "streamable_http"] = Field(
         default="sse",
-        description="Transport type: 'sse' (default) or 'stdio'",
+        description="Transport type: 'sse' (default), 'http' / 'streamable_http', or 'stdio'",
     )
     url: str | None = Field(
         default=None,
-        description="URL for SSE transport",
+        description="URL for HTTP or SSE transport",
     )
     headers: dict[str, str] = Field(
         default_factory=dict,
-        description="Optional headers for SSE transport (e.g. Authorization)",
+        description="Optional headers for HTTP or SSE transport (e.g. Authorization)",
     )
     command: str | None = Field(
         default=None,
@@ -83,6 +83,8 @@ class MCPServerConfig(BaseModel):
                 d["type"] = "stdio"
             else:
                 d["type"] = "sse"
+        elif d["type"] in ("streamable_http", "streamable-http"):
+            d["type"] = "http"
         return d
 
 
@@ -205,7 +207,7 @@ class MCPManager:
             try:
                 tools = await self.connect_server(server_name)
                 all_tools.extend(tools)
-            except Exception as exc:
+            except BaseException as exc:
                 _log.warning("Failed to connect to MCP server '%s': %s", server_name, exc)
 
         return all_tools
@@ -249,8 +251,35 @@ class MCPManager:
         elif cfg.type == "sse":
             from mcp.client.sse import sse_client  # type: ignore[import-not-found]
 
-            tools = await self._connect_sse(
-                server_name, cfg, ClientSession, sse_client,
+            try:
+                tools = await self._connect_sse(
+                    server_name, cfg, ClientSession, sse_client,
+                )
+            except Exception as sse_err:
+                try:
+                    from mcp.client.streamable_http import (  # type: ignore[import-not-found]
+                        create_mcp_http_client,
+                        streamable_http_client,
+                    )
+
+                    _log.info(
+                        "MCP server '%s': SSE connection failed (%s), attempting HTTP fallback...",
+                        server_name,
+                        sse_err,
+                    )
+                    tools = await self._connect_http(
+                        server_name, cfg, ClientSession, streamable_http_client, create_mcp_http_client,
+                    )
+                except Exception:
+                    raise sse_err
+        elif cfg.type in ("http", "streamable_http"):
+            from mcp.client.streamable_http import (  # type: ignore[import-not-found]
+                create_mcp_http_client,
+                streamable_http_client,
+            )
+
+            tools = await self._connect_http(
+                server_name, cfg, ClientSession, streamable_http_client, create_mcp_http_client,
             )
         else:
             _log.warning(
@@ -321,7 +350,7 @@ class MCPManager:
         for cleanup in reversed(cleanups):
             try:
                 await cleanup(None, None, None)
-            except Exception as exc:
+            except BaseException as exc:
                 _log.warning("MCP cleanup error for '%s': %s", server_name, exc)
 
         if not keep_tools:
@@ -396,20 +425,27 @@ class MCPManager:
             read_stream, write_stream = transport
             session_ctx = ClientSession(read_stream, write_stream)
             session = await session_ctx.__aenter__()
+            cleanups.append(session_ctx.__aexit__)
+            self._server_cleanups[server_name] = cleanups
+            self._server_sessions[server_name] = session
+            try:
+                import asyncio
+
+                self._server_loops[server_name] = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+
+            return await self._discover_tools(server_name, session)
         except BaseException:
-            await transport_ctx.__aexit__(None, None, None)
+            self._server_sessions.pop(server_name, None)
+            self._server_cleanups.pop(server_name, None)
+            self._server_loops.pop(server_name, None)
+            for cl in reversed(cleanups):
+                try:
+                    await cl(None, None, None)
+                except BaseException:
+                    pass
             raise
-        cleanups.append(session_ctx.__aexit__)
-        self._server_cleanups[server_name] = cleanups
-        self._server_sessions[server_name] = session
-        try:
-            import asyncio
-
-            self._server_loops[server_name] = asyncio.get_running_loop()
-        except RuntimeError:
-            pass
-
-        return await self._discover_tools(server_name, session)
 
     async def _connect_sse(
         self,
@@ -430,20 +466,74 @@ class MCPManager:
             read_stream, write_stream = transport
             session_ctx = ClientSession(read_stream, write_stream)
             session = await session_ctx.__aenter__()
+            cleanups.append(session_ctx.__aexit__)
+            self._server_cleanups[server_name] = cleanups
+            self._server_sessions[server_name] = session
+            try:
+                import asyncio
+
+                self._server_loops[server_name] = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+
+            return await self._discover_tools(server_name, session)
         except BaseException:
-            await transport_ctx.__aexit__(None, None, None)
+            self._server_sessions.pop(server_name, None)
+            self._server_cleanups.pop(server_name, None)
+            self._server_loops.pop(server_name, None)
+            for cl in reversed(cleanups):
+                try:
+                    await cl(None, None, None)
+                except BaseException:
+                    pass
             raise
-        cleanups.append(session_ctx.__aexit__)
-        self._server_cleanups[server_name] = cleanups
-        self._server_sessions[server_name] = session
+
+    async def _connect_http(
+        self,
+        server_name: str,
+        cfg: MCPServerConfig,
+        ClientSession: type,
+        streamable_http_client: Any,
+        create_mcp_http_client: Any | None = None,
+    ) -> list[Any]:
+        """Connect to a single HTTP-based MCP server (Streamable HTTP transport)."""
+        if not cfg.url:
+            _log.warning("MCP server '%s': no url specified for http type, skipping", server_name)
+            return []
+
+        if create_mcp_http_client is not None and callable(create_mcp_http_client):
+            http_client = create_mcp_http_client(headers=cfg.headers or None)
+            transport_ctx = streamable_http_client(cfg.url, http_client=http_client)
+        else:
+            transport_ctx = streamable_http_client(cfg.url)
+
+        transport = await transport_ctx.__aenter__()
+        cleanups: list[Any] = [transport_ctx.__aexit__]
         try:
-            import asyncio
+            read_stream, write_stream = transport
+            session_ctx = ClientSession(read_stream, write_stream)
+            session = await session_ctx.__aenter__()
+            cleanups.append(session_ctx.__aexit__)
+            self._server_cleanups[server_name] = cleanups
+            self._server_sessions[server_name] = session
+            try:
+                import asyncio
 
-            self._server_loops[server_name] = asyncio.get_running_loop()
-        except RuntimeError:
-            pass
+                self._server_loops[server_name] = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
 
-        return await self._discover_tools(server_name, session)
+            return await self._discover_tools(server_name, session)
+        except BaseException:
+            self._server_sessions.pop(server_name, None)
+            self._server_cleanups.pop(server_name, None)
+            self._server_loops.pop(server_name, None)
+            for cl in reversed(cleanups):
+                try:
+                    await cl(None, None, None)
+                except BaseException:
+                    pass
+            raise
 
     async def close(self, keep_tools: bool = False) -> None:
         """Disconnect from all MCP servers."""

@@ -109,6 +109,14 @@ def test_mcp_server_config_type_inference():
     c4 = MCPServerConfig.model_validate({"type": "sse", "url": "https://api.example.com"})
     assert c4.type == "sse"
 
+    # type="http"
+    c5 = MCPServerConfig.model_validate({"type": "http", "url": "https://api.example.com"})
+    assert c5.type == "http"
+
+    # type="streamable_http" -> normalized to "http"
+    c6 = MCPServerConfig.model_validate({"type": "streamable_http", "url": "https://api.example.com"})
+    assert c6.type == "http"
+
 
 def test_mcp_server_config_always_allow_aliases():
     c_camel = MCPServerConfig.model_validate({"url": "http://x", "alwaysAllow": ["a", "b"]})
@@ -406,5 +414,128 @@ async def test_mcp_manager_call_tool_auto_reconnect(monkeypatch):
     assert res == "reconnected response"
     assert "test" in reconnected
     assert manager.is_server_connected("test") is True
+
+
+async def test_mcp_manager_connect_http_missing_url():
+    from agent2.mcp import MCPManager
+
+    cfg = MCPServerConfig(type="http", url=None)
+    manager = MCPManager({"test": cfg})
+    tools = await manager._connect_http("test", cfg, object, object)
+    assert tools == []
+
+
+async def test_mcp_manager_connect_http_flow():
+    from unittest.mock import AsyncMock, MagicMock
+    from agent2.mcp import MCPManager
+
+    cfg = MCPServerConfig(
+        type="http",
+        url="https://api.example.com/mcp",
+        headers={"Authorization": "Bearer http-token"},
+    )
+    manager = MCPManager({"test": cfg})
+
+    fake_tool_def = MagicMock()
+    fake_tool_def.name = "http_calculator"
+    fake_tool_def.description = "Add two numbers"
+    fake_tool_def.inputSchema = {"properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}}
+
+    fake_session = AsyncMock()
+    fake_session.initialize = AsyncMock()
+    fake_result = MagicMock()
+    fake_result.tools = [fake_tool_def]
+    fake_session.list_tools = AsyncMock(return_value=fake_result)
+
+    block = MagicMock()
+    block.text = "sum: 42"
+    fake_call_resp = MagicMock()
+    fake_call_resp.content = [block]
+    fake_session.call_tool = AsyncMock(return_value=fake_call_resp)
+
+    class FakeSessionCtx:
+        async def __aenter__(self):
+            return fake_session
+
+        async def __aexit__(self, *args):
+            pass
+
+    captured = {}
+
+    def fake_create_mcp_http_client(headers=None):
+        captured["headers"] = headers
+        return "mock_http_client"
+
+    def fake_streamable_http_client(url, http_client=None):
+        captured["url"] = url
+        captured["http_client"] = http_client
+
+        class FakeTransportCtx:
+            async def __aenter__(self):
+                return ("read_stream", "write_stream")
+
+            async def __aexit__(self, *args):
+                pass
+
+        return FakeTransportCtx()
+
+    tools = await manager._connect_http(
+        "test",
+        cfg,
+        lambda r, w: FakeSessionCtx(),
+        fake_streamable_http_client,
+        fake_create_mcp_http_client,
+    )
+    assert len(tools) == 1
+    assert tools[0].name == "http_calculator"
+    assert captured["url"] == "https://api.example.com/mcp"
+    assert captured["headers"] == {"Authorization": "Bearer http-token"}
+    assert captured["http_client"] == "mock_http_client"
+
+    res = await tools[0].execute()
+    assert res == "sum: 42"
+
+    await manager.close()
+    assert len(manager._cleanup_fns) == 0
+    assert len(manager._sessions) == 0
+
+
+async def test_mcp_manager_fallback_sse_to_http(monkeypatch):
+    from unittest.mock import AsyncMock
+    from agent2.mcp import MCPManager
+
+    import sys
+    import types
+
+    fake_mcp = types.ModuleType("mcp")
+    fake_mcp.ClientSession = object  # type: ignore[attr-defined]
+    fake_mcp_client = types.ModuleType("mcp.client")
+    fake_mcp_sse = types.ModuleType("mcp.client.sse")
+    fake_mcp_sse.sse_client = object  # type: ignore[attr-defined]
+    fake_mcp_sh = types.ModuleType("mcp.client.streamable_http")
+    fake_mcp_sh.streamable_http_client = object  # type: ignore[attr-defined]
+    fake_mcp_sh.create_mcp_http_client = object  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "mcp", fake_mcp)
+    monkeypatch.setitem(sys.modules, "mcp.client", fake_mcp_client)
+    monkeypatch.setitem(sys.modules, "mcp.client.sse", fake_mcp_sse)
+    monkeypatch.setitem(sys.modules, "mcp.client.streamable_http", fake_mcp_sh)
+
+    cfg = MCPServerConfig(type="sse", url="http://example.com/mcp")
+    manager = MCPManager({"test": cfg})
+
+    tool = _make_mcp_tool("http_tool", "desc", {}, lambda **kw: "")
+    mock_connect_sse = AsyncMock(side_effect=RuntimeError("SSE not supported"))
+    mock_connect_http = AsyncMock(return_value=[tool])
+
+    monkeypatch.setattr(manager, "_connect_sse", mock_connect_sse)
+    monkeypatch.setattr(manager, "_connect_http", mock_connect_http)
+
+    tools = await manager.connect_server("test")
+    assert len(tools) == 1
+    assert tools[0].name == "http_tool"
+    assert mock_connect_sse.call_count == 1
+    assert mock_connect_http.call_count == 1
+
 
 

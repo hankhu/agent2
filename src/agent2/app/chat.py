@@ -581,6 +581,7 @@ def _print_help() -> None:
     table.add_row("/model [name]", "Open model selection menu or switch directly (e.g. `/model deepseek`)")
     table.add_row("/tools", "List currently enabled tools and their descriptions")
     table.add_row("/skills", "List available skills (use /<skill_name> [prompt] to invoke)")
+    table.add_row("/cfg", "Open configuration in system editor")
     table.add_row("/yolo [on|off|show]", "YOLO / Autopilot mode: auto-approve operations & autonomous decisions")
     table.add_row("/allow-all [on|off|show]", "Allow-all mode: auto-approve all operations")
     table.add_row("/compact [keep]", "Compact conversation context to free window capacity")
@@ -806,6 +807,33 @@ async def _run_interactive(
                     console.print(
                         f"[bold green]🧹 Conversation compacted: {stats['messages_before']} messages → {stats['messages_after']} messages.[/bold green]\n"
                     )
+                continue
+
+            elif cmd in ("/cfg", "/config"):
+                from agent2.app.config import (
+                    get_system_editor,
+                    prepare_and_backup_config,
+                    validate_after_edit,
+                )
+
+                backed_up, file_path = prepare_and_backup_config()
+                editor_cmd = get_system_editor()
+                console.print(
+                    f"\n📝 Opening [bold]{file_path}[/bold] with [cyan]{' '.join(editor_cmd)}[/cyan]..."
+                )
+                import subprocess
+
+                try:
+                    subprocess.run([*editor_cmd, file_path], check=True)
+                except Exception as exc:
+                    console.print(f"\n❌ Failed to launch editor: {exc}\n")
+                    continue
+
+                valid, status_msg = validate_after_edit()
+                if valid:
+                    console.print(f"\n✅ {status_msg}\n")
+                else:
+                    console.print(f"\n⚠️ {status_msg}\n")
                 continue
 
             elif cmd == "/help":

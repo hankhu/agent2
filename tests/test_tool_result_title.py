@@ -54,6 +54,24 @@ def test_tool_card_result_title_extraction() -> None:
     assert card5._get_result_title() == "Result: custom_tool"
 
 
+def test_friendly_operation_slash_labels() -> None:
+    read_card = ToolCard("file_read", {"path": "src/main.py"})
+    assert "/read:" in read_card._get_operation_text()
+    assert "src/main.py" in read_card._get_operation_text()
+
+    write_card = ToolCard("file_write", {"path": "src/out.py", "content": "..."})
+    assert "/write:" in write_card._get_operation_text()
+    assert "src/out.py" in write_card._get_operation_text()
+
+    exec_card = ToolCard("shell_exec", {"command": "ls -la\npwd"})
+    assert "/exec:" in exec_card._get_operation_text()
+    assert "ls -la" in exec_card._get_operation_text()
+
+    py_card = ToolCard("python_exec", {"code": "print(123)\nprint(456)"})
+    assert "/exec:" in py_card._get_operation_text()
+    assert "print(123)" in py_card._get_operation_text()
+
+
 @pytest.mark.asyncio
 async def test_tool_card_collapsible_mount_and_set_result() -> None:
     from agent2.app.tui.widgets.tool_card import ToolTitle
@@ -76,13 +94,22 @@ async def test_tool_card_collapsible_mount_and_set_result() -> None:
         card.set_result("On branch main\nnothing to commit", is_error=False)
         await pilot.pause()
 
-        assert "Exec:" in result_w.title or "shell_exec" in result_w.title
+        assert "/exec:" in result_w.title or "Exec:" in result_w.title or "shell_exec" in result_w.title
         assert result_w.collapsed is True
         assert title_w.running is False
         # Success: success|fail+"Result" omitted, no additional line!
         assert len(card.query("#tool-status")) == 0
 
-        # 3. Ctrl+O expands result
+        # 3. Direct click on title toggles expand/collapse
+        await pilot.click(title_w)
+        await pilot.pause()
+        assert result_w.collapsed is False
+
+        await pilot.click(title_w)
+        await pilot.pause()
+        assert result_w.collapsed is True
+
+        # 4. Ctrl+O expands result
         await pilot.press("ctrl+o")
         await pilot.pause()
         assert result_w.collapsed is False

@@ -607,12 +607,27 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 | LLM 返回非法 JSON（计划/反思） | `extract_json()` 容忍 Markdown 代码块包裹；反思解析失败时返回 `passed=False` 并记录警告日志（不再静默假设通过） |
 | Ask 模式尝试调用写/执行工具 | 两道防线：`_run_loop()` 过滤 Schema + `_execute_tool_calls()` 强行拦截并返回错误工具响应 |
 | Plan 模式任务依赖存在环路 | Kahn 算法检测到环路或不可达时安全降级为原任务顺序，避免死锁或崩溃 |
-| 配置文件不存在或格式错误 | 静默返回默认配置；`load_models()` 中 `create_llm` 失败时记录警告并跳过 |
+| 配置文件不存在或格式错误 | `load_config()` 捕获异常并自动回退加载 `config.json.backup`，双重损坏时返回默认 `AppConfig()` |
 | openai 包未安装 | 延迟到首次使用时才 `ImportError`，附带安装提示 |
 | 记忆持久化文件损坏 | 静默忽略，使用空记忆启动 |
 | Shell 命令超时 | 使用 `os.killpg` 清理整个进程组，防止子进程残留 |
 | 工具动态加载失败 | 仅捕获 `ImportError` / `AttributeError`，附带警告日志（不再 `except Exception: pass`） |
 
 **设计思想：Agent 系统应尽量自愈，避免因单点故障中断整个推理流程。**
+
+---
+
+## 9. MCP Streamable HTTP 与配置安全运维
+
+### 9.1 Streamable HTTP 原生集成与局部作用域退出
+- **传输层支持**：在 `MCPManager` 中通过 `mcp.client.streamable_http.streamable_http_client` 建立连接，由 `create_mcp_http_client(headers=...)` 注入自定义鉴权标头。
+- **AnyIO Cancel Scope 本地清理**：AnyIO 规定异步上下文管理器（如 HTTP/SSE transport）的 `__aexit__` 必须在其 `__aenter__` 相同的 task 中被调用。如果 `_discover_tools()` 抛出异常，在 `_connect_http` / `_connect_sse` 的异常块中立即倒序 await `cleanups`，避免跨 task 甚至跨 loop 清理时触发 `Attempted to exit cancel scope in a different task than it was entered in` 异常。
+
+### 9.2 Textual 挂起唤起与配置备份容灾
+- **终端让出机制**：使用 Textual 内建的 `with self.app.suspend():` 上下文管理器临时停用 TUI 输入/输出并将终端重定向至标准 I/O，以运行外部交互式编辑器（nano / vim / vi / notepad），退出后无缝恢复 TUI 渲染。
+- **双保险校验备份**：打开编辑器前镜像备份至 `config.json.backup`；保存退出后执行 Pydantic Schema 校验，通过后更新备份，解析失败时保留有效备份并向用户发出警告。
+
+### 9.3 CollapsibleTitle 点击冒泡抑制
+- Textual 的事件分发机制会沿类 MRO 查找匹配的命名处理器（`_on_click`）。子类在重写 `_on_click` 时不仅需要 `event.stop()` 阻断 DOM 冒泡，还需要显式调用 `event.prevent_default()` 阻断父类 `CollapsibleTitle._on_click` 的分发，否则同一点击事件会被分发两次导致折叠状态原地还原。
 
 

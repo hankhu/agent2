@@ -14,8 +14,8 @@
 | 💾 **记忆系统** | 短期 (WorkingMemory) + 长期 (LongTermMemory/TF-IDF) |
 | 👥 **多 Agent 编排** | 顺序/监督者/辩论 三种协作模式 |
 | 📚 **Context / Skills** | 自动加载 Rules 与 SKILL.md，支持 /skills 浏览与动态调用 |
-| 🔌 **MCP 工具集成** | 通过 MCP server 动态扩展外部工具 |
-| 🛡️ **多级审批** | Approve once / conversation / project / always 四级作用域 |
+| 🔌 **MCP 工具集成** | 支持 stdio / SSE / Streamable HTTP 协议与 /mcp 动态管理 |
+| ⚙️ **配置与安全** | /cfg 系统编辑器配置与自动备份容灾，四级审批作用域 |
 | 🚀 **YOLO / Allow-all** | 自动批准所有工具执行，YOLO 模式由 LLM 自主决策 |
 | ⚡ **性能指标** | 实时 TPS、会话时长与慢操作耗时/开始时间可视化 |
 

@@ -72,6 +72,7 @@ class ContextBar(Static):
     provider: reactive[str] = reactive("")
     busy: reactive[bool] = reactive(False)
     status_text: reactive[str] = reactive("")
+    status_state: reactive[str] = reactive("idle")
 
     input_tokens: reactive[int] = reactive(0)
     output_tokens: reactive[int] = reactive(0)
@@ -154,6 +155,8 @@ class ContextBar(Static):
                 elapsed += ")"
             label = self.status_text or "Processing…"
             left = f"[cyan]{frame}[/cyan] [bold]{label}[/bold]{elapsed}"
+        elif self.status_state == "wait for input":
+            left = "[bold yellow]⏸ wait for input[/bold yellow]"
         else:
             p = self.cwd or os.getcwd()
             left = f"[dim]{p}[/dim]"
@@ -207,6 +210,16 @@ class StatusBar(Static):
     provider: reactive[str] = reactive("")
     busy: reactive[bool] = reactive(False)
     status_text: reactive[str] = reactive("")
+    status_state: reactive[str] = reactive("idle")
+
+    @property
+    def status(self) -> str:
+        """Current status state ('idle', 'wait for input', 'busy')."""
+        return self.status_state
+
+    @status.setter
+    def status(self, val: str) -> None:
+        self.status_state = val
 
     input_tokens: reactive[int] = reactive(0)
     output_tokens: reactive[int] = reactive(0)
@@ -291,6 +304,13 @@ class StatusBar(Static):
             mode_badge = "[bold green]AGENT[/bold green]"
 
         badges = [mode_badge]
+        if self.status_state == "wait for input":
+            badges.append("[bold yellow]wait for input[/bold yellow]")
+        elif self.status_state == "idle":
+            badges.append("[dim]idle[/dim]")
+        elif self.busy:
+            label = self.status_text or "busy"
+            badges.append(f"[bold cyan]{label}[/bold cyan]")
         session_elapsed = max(0.0, time.monotonic() - self._session_start)
         if self.long_operation:
             badges.append(f"[dim]↳ {self.long_operation}[/dim]")

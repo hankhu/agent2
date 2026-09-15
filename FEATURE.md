@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.3.20 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.21 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -174,10 +174,13 @@
     - conversation / project / global 三级授权持久化到 `.agent2/approvals.json` 或 `~/.config/agent2/approvals.json`。
     - 审批完成后自动转换为历史状态徽标（`✓ Approved once` / `✓ Approved in project` / `✓ Always approved` / `✗ Rejected`），并将输入焦点归还输入框。
   - **工具执行结果面板折叠与快捷切换 (`ToolCard` / `Ctrl+O`)**：
-    - 工具卡片标题自动显示操作摘要（shell command 首行 / python 首行 / 文件路径 / web query 等），运行中显示 `⏳` 且禁止折叠。
+    - 工具卡片标题自动显示操作摘要（格式化为 `⚙ /read: <path>`、`⚙ /write: <path>`、`⚙ /exec: <command>` 等），运行中显示 `⏳` 且禁止折叠。
     - 工具执行结果面板（Result Panel）默认折叠展示（`collapsed=True`），成功结果保持紧凑，错误结果额外显示 `❌ Error` 状态行。
-    - 全局快捷键 `Ctrl+O` 一键批量展开 / 收起所有工具执行结果面板。
-  - **会话性能指标 (TPS / 耗时 / 慢操作回落)** — `StatusBar` / `ContextBar` 实时展示会话时长 `⏱`、吞吐 `TPS: n tok/s`，并对耗时 ≥5s 的慢操作显示 `↳ <操作> 6.3s (started HH:MM:SS)`；`ToolCard` 在长耗时工具执行后于标题追加耗时与开始时间。
+    - 全局快捷键 `Ctrl+O` 一键批量展开 / 收起所有工具执行结果面板；点击标题可流畅切换。
+  - **状态响应与会话性能指标 (`idle` / `wait for input` / TPS / 慢操作)**：
+    - `StatusBar` / `ContextBar` 精细化响应 Agent 运行生命周期：完成回答后显示 `idle`；等待确认（HITL ConfirmCard）、计划审批或向用户提问等待输入时显示 `wait for input`。
+    - 实时展示会话时长 `⏱`、吞吐 `TPS: n tok/s`，并对耗时 ≥5s 的慢操作显示 `↳ <操作> 6.3s (started HH:MM:SS)`；`ToolCard` 在长耗时工具执行后于标题追加耗时与开始时间。
+  - **配置管理与备份容灾 (`/cfg` / `/config`)** — 输入 `/cfg` 自动唤起系统文本编辑器（`$VISUAL` / `$EDITOR` 或 `nano`/`vim`/`vi`/`notepad`）直接编辑配置文件，保存后自动做 Schema 校验并刷新 `config.json.backup`；读取出错时全局自动回退至备份。
   - **Token 用量持久化与实时同步** — 会话保存 `usage`；恢复会话、切换模型、Plan 子任务聚合均保留 Token 计数；Thought / Tool 完成事件实时刷新 `ContextBar`，取消或异常时也会同步。
   - **YOLO / Allow-all 模式** — `/yolo` 自动批准所有操作并注入自主决策系统提示；`/allow-all` 仅自动批准；状态栏显示 `YOLO` / `ALLOW-ALL` 徽标。
   - **对话回退与分叉 (`/rewind` / `/fork`)** — `/rewind` 回退最近一轮对话并将用户输入填回输入框；`/fork [title]` 克隆当前完整会话为新 session 继续对话。
@@ -211,8 +214,8 @@
 
 ### 8.3 MCP (Model Context Protocol) (`agent2.mcp`)
 
-- `MCPManager` 支持 stdio 与 SSE 双传输协议，动态发现 tools 并包装为 agent2 `Tool`。
-- `config.json` 的 `mcp_servers` 全面支持 `type` (`"sse"` / `"stdio"`)、`url`、`headers`、`command`、`args`、`env`、`disabled` 及 `alwaysAllow` / `always_allow`。
+- `MCPManager` 支持 stdio、SSE 与 HTTP (Streamable HTTP) 三种传输协议，动态发现 tools 并包装为 agent2 `Tool`。
+- `config.json` 的 `mcp_servers` 全面支持 `type` (`"sse"` / `"stdio"` / `"http"` / `"streamable_http"`)、`url`、`headers`、`command`、`args`、`env`、`disabled` 及 `alwaysAllow` / `always_allow`。
 - **跨事件循环生命周期与自愈**：具有 loop 感知机制，检测到跨事件循环或连接意外断开时自动重连；启动与退出时优雅释放资源。
 - **TUI 管理命令**：`/mcp` (`list` / `enable` / `disable`) 支持实时连接/断开与持久化配置；`/tools` 命令查看当前激活工具。
 - 可选依赖：`uv pip install agent2[mcp]`（`mcp>=1.0`）。

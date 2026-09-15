@@ -63,6 +63,8 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/skills", "List available skills (use /<skill_name> to invoke)"),
     ("/tools", "List currently active tools and descriptions"),
     ("/mcp", "Manage MCP servers: list, enable, disable (/mcp [list|enable|disable])"),
+    ("/cfg", "Open configuration (~/.config/agent2/config.json) in system editor"),
+    ("/config", "Alias for /cfg"),
     ("/clear", "Clear display"),
     ("/compact", "Compact conversation context to free window capacity (/compact [keep_turns])"),
     ("/retry", "Retry last user query / regenerate response"),
@@ -138,6 +140,22 @@ class StatusText(Message):
         self.text = text
 
 
+def _is_waiting_for_input(text: str | None) -> bool:
+    """Check if the assistant response is asking a question or waiting for user input."""
+    if not text:
+        return False
+    stripped = text.strip()
+    clean = stripped.rstrip("*_`~ ")
+    if clean.endswith(("?", "？")):
+        return True
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    if lines:
+        last_clean = lines[-1].rstrip("*_`~ ")
+        if last_clean.endswith(("?", "？")):
+            return True
+    return False
+
+
 # ── ChatScreen ──────────────────────────────────────────────────
 
 
@@ -208,6 +226,12 @@ class ChatScreen(Screen):
 
     async def _init_mcp_servers(self) -> None:
         """Connect enabled MCP servers inside Textual's active event loop."""
+        import os
+
+        # Skip loading user's external MCP servers during automated testing unless explicitly injected
+        if os.environ.get("PYTEST_CURRENT_TEST") and getattr(self.app, "mcp_manager", None) is None:
+            return
+
         from agent2.app.config import load_config
         from agent2.mcp import MCPManager, MCPServerConfig
 
@@ -235,7 +259,7 @@ class ChatScreen(Screen):
                 app.agent.tool_registry.register(t)
             if hasattr(app.agent, "_auto_approved"):
                 app.agent._auto_approved.update(manager.always_allow_tools)
-        except Exception as exc:
+        except BaseException as exc:
             import logging
 
             logging.getLogger(__name__).warning("MCP background init error: %s", exc)
@@ -387,18 +411,21 @@ class ChatScreen(Screen):
             callback=on_skill,
         )
 
-    def _set_busy(self, busy: bool, text: str = "") -> None:
+    def _set_busy(self, busy: bool, text: str = "", state: str | None = None) -> None:
         """Update busy state and status text on both StatusBar and ContextBar."""
+        effective_state = state if state is not None else ("busy" if busy else "idle")
         try:
             status = self.query_one(StatusBar)
             status.busy = busy
             status.status_text = text if busy else ""
+            status.status_state = effective_state
         except Exception:
             pass
         try:
             ctx = self.query_one(ContextBar)
             ctx.busy = busy
             ctx.status_text = text if busy else ""
+            ctx.status_state = effective_state
         except Exception:
             pass
 
@@ -771,6 +798,7 @@ class ChatScreen(Screen):
         # response returns (or the request fails / is interrupted).
         self._set_busy(True, "Processing…")
 
+        result: str | None = None
         try:
             # Expand #file / #dir context inside the worker so slow disk
             # reads don't delay the user message from appearing.
@@ -788,7 +816,8 @@ class ChatScreen(Screen):
         finally:
             agent.log = original_log
             if generation == self._run_generation:
-                self._set_busy(False)
+                next_state = "wait for input" if _is_waiting_for_input(result) else "idle"
+                self._set_busy(False, state=next_state)
             self._sync_status_bar()
 
         # Auto-save (skipped when the conversation has no input at all)
@@ -839,7 +868,8 @@ class ChatScreen(Screen):
             app.session_manager.log_event(app.session_id, "ERROR", str(exc))
         finally:
             if generation == self._run_generation:
-                self._set_busy(False)
+                next_state = "wait for input" if self._pending_plan else "idle"
+                self._set_busy(False, state=next_state)
             self._sync_status_bar()
 
         self._save_session()
@@ -864,6 +894,7 @@ class ChatScreen(Screen):
         ordered_tasks = topological_sort_tasks(plan.tasks)
         task_results: dict[str, str] = {}
         recorded_results: list[dict[str, Any]] = []
+        final_answer: str | None = None
 
         try:
             total = len(ordered_tasks)
@@ -948,7 +979,8 @@ class ChatScreen(Screen):
             app.session_manager.log_event(app.session_id, "ERROR", str(exc))
         finally:
             if generation == self._run_generation:
-                self._set_busy(False)
+                next_state = "wait for input" if _is_waiting_for_input(final_answer) else "idle"
+                self._set_busy(False, state=next_state)
             self._sync_status_bar()
 
         self._save_session()
@@ -996,6 +1028,9 @@ class ChatScreen(Screen):
         future: asyncio.Future[str] = asyncio.get_event_loop().create_future()
         messages = self.query_one("#messages", MessageList)
 
+        self._set_busy(False, state="wait for input")
+        self._sync_status_bar()
+
         def on_decision(result: str) -> None:
             if not future.done():
                 future.set_result(result or "reject")
@@ -1005,7 +1040,10 @@ class ChatScreen(Screen):
             tool_call.arguments,
             on_decision=on_decision,
         )
-        return await future
+        decision = await future
+        self._set_busy(True, "Processing…")
+        self._sync_status_bar()
+        return decision
 
     # ── TUI-logger event handlers ───────────────────────────────
 
@@ -1360,6 +1398,7 @@ class ChatScreen(Screen):
                 "  /resume [id]    Resume session\n"
                 "  /rename <title> Rename current session\n"
                 "  /export [path]  Export conversation history\n"
+                "  /cfg            Open configuration in system editor\n"
                 "  /yolo [on|off|show]      YOLO / Autopilot mode: auto-approve operations & autonomous decisions\n"
                 "  /allow-all [on|off|show] Allow-all mode: auto-approve all operations\n"
                 "  /help           This help\n"
@@ -1425,6 +1464,9 @@ class ChatScreen(Screen):
 
         elif cmd == "/mcp":
             await self._handle_mcp(arg)
+
+        elif cmd in ("/cfg", "/config"):
+            self._handle_cfg()
 
         else:
             # ── Dynamic skill invocation: /<skill_name> [prompt] ──
@@ -1635,6 +1677,41 @@ class ChatScreen(Screen):
                 "  /mcp disable <server-name>"
             )
 
+    def _handle_cfg(self) -> None:
+        """Open ~/.config/agent2/config.json in system editor with backup protection."""
+        from agent2.app.config import (
+            get_system_editor,
+            prepare_and_backup_config,
+            validate_after_edit,
+        )
+
+        messages = self.query_one("#messages", MessageList)
+        backed_up, file_path = prepare_and_backup_config()
+        editor_cmd = get_system_editor()
+        editor_name = " ".join(editor_cmd)
+
+        messages.add_system_message(
+            f"📝 Opening [bold]{file_path}[/bold] with [cyan]{editor_name}[/cyan]..."
+        )
+
+        import subprocess
+
+        try:
+            can_suspend = getattr(getattr(self.app, "_driver", None), "can_suspend", False)
+            if can_suspend:
+                with self.app.suspend():
+                    subprocess.run([*editor_cmd, file_path], check=True)
+            else:
+                subprocess.run([*editor_cmd, file_path], check=True)
+        except Exception as exc:
+            messages.add_system_message(f"❌ Failed to launch editor '{editor_name}': {exc}")
+            return
+
+        valid, status_msg = validate_after_edit()
+        if valid:
+            messages.add_system_message(f"✅ {status_msg}")
+        else:
+            messages.add_system_message(f"⚠️ {status_msg}")
 
     def _rebuild_messages(self) -> None:
         """Re-populate the message list from the agent's history."""
@@ -2027,6 +2104,7 @@ class ChatScreen(Screen):
             context_bar.tps = tps
             context_bar.busy = status.busy
             context_bar.status_text = status.status_text
+            context_bar.status_state = getattr(status, "status_state", "idle")
 
         # Surface slow provider requests in the duration/start-time readout.
         last_duration = getattr(llm, "last_request_duration", None)

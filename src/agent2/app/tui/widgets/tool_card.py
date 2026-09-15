@@ -59,10 +59,10 @@ class ToolTitle(CollapsibleTitle):
         )
 
     async def _on_click(self, event: events.Click) -> None:
-        if self.running:
-            event.stop()
-            return
-        await super()._on_click(event)
+        event.stop()
+        event.prevent_default()
+        if not self.running:
+            self.post_message(self.Toggle())
 
     def action_toggle_collapsible(self) -> None:
         if self.running:
@@ -150,14 +150,14 @@ class ToolCard(Vertical):
         name = self._tool_name
         if name in ("file_read", "read_file"):
             path = self._arguments.get("path", "")
-            return f"[bold yellow]⚙ Read:[/bold yellow] [dim]{escape(str(path))}[/dim]"
+            return f"[bold yellow]⚙ /read:[/bold yellow] [dim]{escape(str(path))}[/dim]"
         if name in ("file_write", "write_file"):
             path = self._arguments.get("path", "")
-            return f"[bold yellow]⚙ Write:[/bold yellow] [dim]{escape(str(path))}[/dim]"
-        if name == "shell_exec":
-            cmd = self._arguments.get("command", "")
+            return f"[bold yellow]⚙ /write:[/bold yellow] [dim]{escape(str(path))}[/dim]"
+        if name in ("shell_exec", "python_exec"):
+            cmd = self._arguments.get("command") or self._arguments.get("code", "")
             first_line = str(cmd).strip().splitlines()[0] if cmd else ""
-            return f"[bold yellow]⚙ Exec:[/bold yellow] [dim]{escape(first_line)}[/dim]"
+            return f"[bold yellow]⚙ /exec:[/bold yellow] [dim]{escape(first_line)}[/dim]"
         return None
 
     def _get_result_title(self) -> str:

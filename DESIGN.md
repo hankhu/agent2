@@ -157,7 +157,7 @@ config.json: mcp_servers
         │
         ▼
    MCPManager.connect()
-        │  stdio / SSE
+        │  stdio / SSE / Streamable HTTP
         ▼
    MCP ClientSession ── list_tools() ──▶ MCP tool schema
         │
@@ -168,9 +168,9 @@ config.json: mcp_servers
    ToolRegistry / Agent 透明调用
 ```
 
-- **协议适配层**：兼容 MCP 2.x `input_schema` 与 1.x `inputSchema`，自动转换为 agent2 `ToolSchema`；MCP 返回的 content blocks 合并为字符串结果。
+- **协议适配层**：兼容 MCP 2.x `input_schema` 与 1.x `inputSchema`，自动转换为 agent2 `ToolSchema`；支持 stdio、SSE 与 Streamable HTTP 三种传输协议；MCP 返回的 content blocks 合并为字符串结果。
 - **委托式调用与自愈**：`Tool` 的 `call_fn` 统一委托到 `MCPManager.call_tool()`，内部感知当前事件循环，遇断连或跨 loop 自动按需建立活跃 session 并重试。
-- **生命周期管理**：`MCPManager` 结构化持有 stdio transport、SSE 客户端与 `ClientSession` 的 cleanups；支持 `close(keep_tools=True)` 在临时 loop 优雅释放网络传输并保留工具元数据，`close()` 逆序完全清理。
+- **生命周期管理**：`MCPManager` 结构化持有 stdio transport、SSE / HTTP 客户端与 `ClientSession` 的 cleanups；支持 `close(keep_tools=True)` 在临时 loop 优雅释放网络传输并保留工具元数据，`close()` 逆序完全清理。
 - **可选依赖**：`mcp` 作为 optional dependency，未安装时 MCP 功能静默降级，不影响核心 Agent 运行。
 
 ### 2.10 多级工具审批作用域模式
@@ -386,6 +386,10 @@ synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
   - **Agent 行为配置**：`max_iterations`（默认 50，兼容 `max_turns` / `max_rounds`）、`rules` inline 规则、`mcp_servers` MCP 服务器。
 - **Provider 推导**：从 base_url 智能提取服务商标识（deepseek / nvidia / siliconflow / localhost 等）。
 - **last_model**：文件持久化上次选择，提升交互体验。
+- **配置备份与容灾回退**：
+  - `backup_config()` 在配置变更与通过 `/cfg` 打开编辑器前，自动镜像备份至 `~/.config/agent2/config.json.backup`。
+  - `load_config()` 全局捕获任何 JSON 解析或校验异常，主配置文件损坏时自动回退至备份配置，杜绝配置丢失与启动崩溃。
+  - `/cfg` 支持利用 Textual `suspend()` 或标准终端无缝唤起系统编辑器并在保存后自动重载与刷新备份。
 
 
 ---

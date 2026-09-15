@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.1.3.21] - 2026-09-15
+
+### Added
+- **配置管理命令 `/cfg` 与备份容灾**：
+  - 新增 `/cfg`（及别名 `/config`）斜杠命令，使用系统文本编辑器（优先通过 `$VISUAL` / `$EDITOR`，自动回退 `nano`/`vim`/`vi`/`notepad`）直接编辑 `~/.config/agent2/config.json`；TUI 模式下使用 `with app.suspend():` 安全让出终端控制权。
+  - 编辑前自动将当前配置备份到 `~/.config/agent2/config.json.backup`；保存退出后自动执行 JSON 与 Schema 合法性校验，校验通过自动刷新最新备份。
+  - `load_config()` 全局捕获读取与解析异常；当 `config.json` 语法损坏或读取出错时，自动加载 `config.json.backup` 作为活跃配置，并在编辑与启动时提供友好预警。
+- **MCP HTTP (Streamable HTTP) 传输协议支持**：
+  - `MCPServerConfig` 增加对 `type: "http"` 及 `type: "streamable_http"` 的原生支持。
+  - 新增 `_connect_http` 使用 MCP 官方 `streamable_http_client` 与 `create_mcp_http_client` 建立连接，并完整支持自定义请求头（`headers`）。
+  - 向后兼容：`type: "sse"` 连接失败时自动回退尝试 Streamable HTTP 协议。
+
+### Changed
+- **状态栏状态响应精细化 (`idle` / `wait for input`)**：
+  - `StatusBar` 与 `ContextBar` 引入 `status_state` 响应式属性：LLM 回答完毕且无需用户输入时显示 `idle`；当暂停等待确认（approve）、计划审批或 LLM 向用户提出问题等待答复时，显示 `wait for input`。
+- **工具调用前缀调整与折叠修复**：
+  - 将工具卡片操作标签由 `Read:` / `Write:` / `Exec:` 统一调整为 `⚙ /read:`、`⚙ /write:`、`⚙ /exec:`。
+  - 修复 `ToolTitle._on_click` 标题点击事件冒泡抑制（`event.prevent_default()`），解决单击卡片标题导致双次切换无法展开的问题。
+- **AnyIO 异步生命周期与测试隔离优化**：
+  - 优化 MCP 连接与工具发现失败时的异常回收机制，确保 AnyIO cancel scope 在同一 task 中即时退出，避免跨 task 释放引发报错。
+  - TUI 后台连接 MCP 服务增加测试环境隔离保护，避免单元测试期间误连宿主机全局外部服务。
+
 ## [0.1.3.20] - 2026-09-15
 
 ### Changed

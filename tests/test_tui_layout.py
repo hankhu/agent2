@@ -603,3 +603,77 @@ async def test_tab_switches_panel_when_not_completing() -> None:
         assert app.screen.query_one(TopTabBar).active_tab == "sessions"
 
 
+@pytest.mark.asyncio
+async def test_status_bar_idle_and_wait_for_input() -> None:
+    """Verify idle when LLM finished answering and wait for input when paused."""
+    from rich.console import Console
+    import io
+
+    console = Console(file=io.StringIO(), color_system="truecolor", width=200)
+
+    # 1. Widget render tests
+    sb = StatusBar()
+    sb.status_state = "idle"
+    with console.capture() as capture:
+        console.print(sb.render())
+    rendered_sb = capture.get()
+    assert "idle" in rendered_sb
+
+    sb.status_state = "wait for input"
+    with console.capture() as capture:
+        console.print(sb.render())
+    rendered_sb = capture.get()
+    assert "wait for input" in rendered_sb
+
+    cb = ContextBar()
+    cb.status_state = "wait for input"
+    with console.capture() as capture:
+        console.print(cb.render())
+    rendered_cb = capture.get()
+    assert "wait for input" in rendered_cb
+
+    # 2. Interactive LLM finish -> idle
+    class QuestionLLM(BaseLLM):
+        def __init__(self, reply: str) -> None:
+            super().__init__(model="test-llm")
+            self.reply = reply
+
+        async def chat(self, messages: list[Message], tools=None) -> LLMResponse:
+            return LLMResponse(message=Message.assistant(self.reply))
+
+    app = Agent2App(agent=ReActAgent(name="test", llm=QuestionLLM("Here is your answer.")))
+    async with app.run_test() as pilot:
+        screen = app.screen
+        chat_input = screen.query_one("#chat-input", ChatInput)
+        sb_inst = screen.query_one(StatusBar)
+        cb_inst = screen.query_one(ContextBar)
+
+        # Initial state is idle
+        assert sb_inst.status_state == "idle"
+
+        # Ask question, LLM finishes statement -> idle
+        chat_input.text = "Hello"
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+
+        assert sb_inst.status_state == "idle"
+        assert cb_inst.status_state == "idle"
+
+    # 3. LLM pauses asking a question -> wait for input
+    app_q = Agent2App(agent=ReActAgent(name="test", llm=QuestionLLM("Do you want to proceed?")))
+    async with app_q.run_test() as pilot:
+        screen = app_q.screen
+        chat_input = screen.query_one("#chat-input", ChatInput)
+        sb_inst = screen.query_one(StatusBar)
+        cb_inst = screen.query_one(ContextBar)
+
+        chat_input.text = "Can you help?"
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+
+        assert sb_inst.status_state == "wait for input"
+        assert cb_inst.status_state == "wait for input"
+
+
