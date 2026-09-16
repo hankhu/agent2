@@ -94,10 +94,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 async def _run_single(agent: TUIReActAgent, prompt: str) -> None:
     """Single-turn mode: answer the prompt and exit."""
+    mcp_mgr = getattr(agent, "mcp_manager", None)
+    if mcp_mgr:
+        try:
+            tools = await mcp_mgr.connect()
+            for t in tools:
+                if t.name in agent.tool_registry:
+                    agent.tool_registry.unregister(t.name)
+                agent.tool_registry.register(t)
+            if hasattr(agent, "_auto_approved"):
+                agent._auto_approved.update(mcp_mgr.always_allow_tools)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("MCP single-turn init error: %s", exc)
     try:
         await agent.chat(prompt)
     finally:
-        mcp_mgr = getattr(agent, "mcp_manager", None)
         if mcp_mgr:
             try:
                 await mcp_mgr.close()

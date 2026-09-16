@@ -228,8 +228,8 @@ class ChatScreen(Screen):
         """Connect enabled MCP servers inside Textual's active event loop."""
         import os
 
-        # Skip loading user's external MCP servers during automated testing unless explicitly injected
-        if os.environ.get("PYTEST_CURRENT_TEST") and getattr(self.app, "mcp_manager", None) is None:
+        # Skip connecting external MCP servers during automated testing unless explicitly enabled
+        if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("AGENT2_TEST_MCP"):
             return
 
         from agent2.app.config import load_config

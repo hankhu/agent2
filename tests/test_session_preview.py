@@ -60,7 +60,8 @@ def test_session_manager_list_and_preview(tmp_path: Path) -> None:
     assert "How do I implement OAuth2" in preview
     assert "🤖 Assistant:" in preview
     assert "OAuth2PasswordBearer" in preview
-    assert "⚙ file_read" in preview
+    assert "read:" in preview
+    assert "main.py" in preview
 
 
 @pytest.mark.asyncio

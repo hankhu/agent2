@@ -152,6 +152,11 @@ class MCPManager:
         self._server_tasks: dict[str, asyncio.Task[None]] = {}
         self._server_shutdowns: dict[str, asyncio.Event] = {}
         self.always_allow_tools: set[str] = set()
+        for s_cfg in self._server_configs.values():
+            if not s_cfg.disabled and s_cfg.always_allow:
+                self.always_allow_tools.update(
+                    t for t in s_cfg.always_allow if t != "*"
+                )
 
     @property
     def servers(self) -> dict[str, MCPServerConfig]:

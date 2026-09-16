@@ -517,7 +517,7 @@
   - `MCPManager.__init__` 新增 `_server_tasks` 与 `_server_shutdowns` 字段；`close()` 同步清理这两个字典。
   - 三个 `_connect_*` 方法统一收敛为 `_start_server_task()` 一行调用，代码量大幅减少。
 
-## 42. 高级多 Agent 综合示例（上下文继承/隔离、Skill 选择性激活、Plan 模式与 Prompt 设定）
+## 42. 高级多 Agent 综合示例（上下文继承/隔离、Skill 选择性激活、Plan 模式与 Prompt 设定） (v0.1.3.23)
 
 - **多 Agent 综合模式示例**（`examples/06_advanced_multi_agent.py`）：
   - **上下文不继承（隔离模式）**：各 sub-agent 初始化为完全独立的新实例，互不共享历史与状态，适用于职责严格隔离的子任务。
@@ -526,4 +526,15 @@
   - **Skill 选择性激活**：实现 `build_prompt_with_skills()`，基于 `discover_skills()` 按需过滤并动态注入指定 Skill 的指令块，支持全激活与完全隔离（最小化模式）。
   - **Plan 模式 Orchestrator**：以 `PlannerAgent` 作为顶层规划编排者，将专业子 Agent（如天气专家、股票专家）封装为 `@tool` 工具，实现由规划模型拆解多步骤后自动分发执行并汇总生成综合报告。
   - **System Prompt 设定与动态切换**：提供构造时定义、运行时 `set_rule()` 动态角色切换（如诗人/程序员/翻译模式转换且保留历史），以及基于模板（`PROMPT_TEMPLATE`）参数化组装的多场景范例。
+
+- **TUI 启动性能大幅优化**（`src/agent2/app/tui/app.py`、`src/agent2/mcp.py`、`src/agent2/app/tui/screens/chat.py`、`src/agent2/app/tui/__init__.py`）：
+  - **根本原因**：`build_tui_agent()` 启动阶段同步调用 `asyncio.run(manager.connect())` 建立网络连接并探测工具，导致配置了远程 MCP（如知乎 SSE、O'Reilly HTTP）时主线程被网络握手阻塞数秒，界面无法创建渲染。
+  - **解耦优化**：
+    - 彻底移除 `build_tui_agent()` 中的同步连接逻辑，`MCPManager` 仅在内存中完成静态实例化并提取配置白名单（`always_allow_tools`），Agent 构建耗时由秒级降至 **1.7ms**。
+    - 统一交由 `ChatScreen.on_mount()` 启动后台异步 Worker（`_init_mcp_servers`）在 Textual 事件循环内静默连接并动态注册工具，TUI 界面实现瞬间秒开（<0.3秒）。
+    - 单轮模式（`-p`）按需在自身协程 `_run_single` 中连接与安全清理；自动化测试期间守卫外部 MCP 请求，防止测试网络抖动。
+
+- **启动性能分析辅助**（`profile_startup.py`）：
+  - 针对 TUI 启动耗时排查，提供分阶段（Import / Config / LLM / Context / MCP）基准测试脚本，精确定位启动开销分布。
+
 

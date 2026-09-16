@@ -484,21 +484,7 @@ def build_tui_agent(
                 for k, v in cfg.mcp_servers.items()
             }
             manager = MCPManager(servers)
-            async def _init_mcp_startup() -> list[Any]:
-                discovered = await manager.connect()
-                await manager.close(keep_tools=True)
-                return discovered
-
-            try:
-                asyncio.get_running_loop()
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    mcp_tools = pool.submit(lambda: asyncio.run(_init_mcp_startup())).result()
-            except RuntimeError:
-                mcp_tools = asyncio.run(_init_mcp_startup())
-            tools.extend(mcp_tools)
-            always_allow_tools = set(manager.always_allow_tools)
+            always_allow_tools = set(getattr(manager, "always_allow_tools", set()))
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning("MCP init failed: %s", exc)

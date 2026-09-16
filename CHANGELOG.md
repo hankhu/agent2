@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.3.23] - 2026-09-17
+
+### Added
+- **高级多 Agent 协作与编排综合示例 (`examples/06_advanced_multi_agent.py`)**：
+  - **上下文不继承（隔离模式）**：各 sub-agent 初始化为完全独立的新实例，互不共享历史与状态，适用于职责严格隔离的子任务。
+  - **上下文全量继承与角色转变**：利用 `orchestrator.fork(name=...)` 深度克隆消息历史与工具上下文，再通过 `set_rule()` 重新赋予特定角色定义。
+  - **上下文选择性继承**：实现 `extract_selective_context()`，保留最近 N 轮完整对话原文，早期对话提炼为紧凑摘要作为背景信息注入 sub-agent。
+  - **Skill 选择性激活与隔离**：实现 `build_prompt_with_skills()`，基于 `discover_skills()` 按需过滤并动态注入指定 Skill 的指令块，支持全激活与完全隔离（最小化模式）。
+  - **Plan 模式 Orchestrator**：以 `PlannerAgent` 作为顶层规划编排者，将专业子 Agent（如天气专家、股票专家）封装为 `@tool` 工具，实现由规划模型拆解多步骤后自动分发执行并汇总生成综合报告。
+  - **System Prompt 设定与动态切换**：提供构造时定义、运行时 `set_rule()` 动态角色切换（如诗人/程序员/翻译模式转换且保留历史），以及基于模板（`PROMPT_TEMPLATE`）参数化组装的多场景范例。
+- **启动性能分析辅助工具 (`profile_startup.py`)**：
+  - 分阶段（模块导入、配置读取、LLM 创建、Context 扫描、MCP 连接）量化启动时间开销。
+
+### Changed
+- **TUI 启动性能大幅优化（彻底移除构建期同步 MCP 网络握手）**：
+  - 彻底移除 `build_tui_agent()` 中通过 `asyncio.run` 同步建立 MCP 网络连接与工具探测的代码，Agent 初始化耗时从数秒级降至 **1.7ms**（提升数百倍）。
+  - 统一交由 `ChatScreen.on_mount()` 启动后台异步 Worker 非阻塞式连接与动态注册 MCP 工具，实现 TUI 终端界面瞬间秒开（<0.3秒），彻底杜绝网络波动或远程 MCP 响应慢导致的主线程卡死。
+  - 单轮运行模式（`-p`）按需在专属异步任务流中连接与释放 MCP 资源。
+- **发版 Skill 流程优化**：完善 `.agents/skills/agent2-release/SKILL.md` 中文档更新细则与异常处理说明。
+
+### Fixed
+- **测试断言适配**：更新 `test_session_preview.py` 断言以匹配友好工具标签格式 (`read:`)。
+
 ## [0.1.3.22] - 2026-09-16
 
 ### Changed

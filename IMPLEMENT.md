@@ -630,4 +630,28 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 ### 9.3 CollapsibleTitle 点击冒泡抑制
 - Textual 的事件分发机制会沿类 MRO 查找匹配的命名处理器（`_on_click`）。子类在重写 `_on_click` 时不仅需要 `event.stop()` 阻断 DOM 冒泡，还需要显式调用 `event.prevent_default()` 阻断父类 `CollapsibleTitle._on_click` 的分发，否则同一点击事件会被分发两次导致折叠状态原地还原。
 
+---
+
+## 10. 多 Agent 编排与上下文管理模式
+
+### 10.1 上下文继承与隔离策略
+- **严格隔离（Sub-agent Isolation）**：子 Agent 初始化为干净新实例，不携带父级对话历史与状态，适用于职责严格拆分、无外部记忆污染的独立子任务。
+- **全量继承与角色转变（Fork + Dynamic Rule）**：通过 `orchestrator.fork(name=...)` 深度克隆消息历史与工具注册表，紧接着调用 `set_rule()` 替换当前角色的 system prompt，实现平滑角色转变与历史上下文复用。
+- **选择性窗口继承（Sliding Window + Summary Injection）**：截取最近 $N$ 轮用户/助手对话保留原始细节，将早期交互提炼为结构化摘要作为背景段落注入子 Agent，平衡长文本开销与上下文连续性。
+
+### 10.2 Skill 按需激活与最小权限原则
+- 利用 `discover_skills()` 发现可用能力包，基于任务类型对 Skill 名称进行白名单过滤；
+- 通过 `build_prompt_with_skills()` 动态组装特定 Skill 的 Markdown 指令并注入对应子 Agent，避免无用 Skill 污染 Prompt 降低模型指令遵循能力。
+
+### 10.3 Plan-and-Execute 编排模式（Master Planner）
+- 采用 `PlannerAgent` 作为中央编排者，将具体业务 Agent 包装为异步 `@tool` 函数；
+- 规划模型自主拆解任务为有序步骤后依次调度各子 Agent 工具，并在末尾由 PlannerAgent 综合各步骤执行结果生成结构化交付物。
+
+### 10.4 TUI 异步事件循环与 MCP 后台懒连接
+- **构建与渲染解耦**：`build_tui_agent()` 阶段仅进行 Pydantic 配置校验与 `MCPManager` 纯内存对象实例化，从配置中静态预提取 `always_allow_tools` 免审批白名单，构建耗时从数秒降低到 **1.7ms**。
+- **后台 Worker 异步握手**：在 `ChatScreen.on_mount()` 中通过 Textual 的 `run_worker(self._init_mcp_servers(), exclusive=False)` 挂载异步任务，在后台完成远程 HTTP/SSE 握手与工具动态注册，确保 TUI 界面可在 0.3 秒内秒开渲染，免受外部网络波动与超时阻塞影响。
+- **单轮运行模式隔离**：在 CLI `-p` 单轮调用中，通过专属异步协程按需初始化并在 finally 块中确保连接回收。
+
+
+
 

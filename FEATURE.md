@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.3.21 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.23 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -218,6 +218,7 @@
 - `config.json` 的 `mcp_servers` 全面支持 `type` (`"sse"` / `"stdio"` / `"http"` / `"streamable_http"`)、`url`、`headers`、`command`、`args`、`env`、`disabled` 及 `alwaysAllow` / `always_allow`。
 - **跨事件循环生命周期与自愈**：具有 loop 感知机制，检测到跨事件循环或连接意外断开时自动重连；启动与退出时优雅释放资源。
 - **TUI 管理命令**：`/mcp` (`list` / `enable` / `disable`) 支持实时连接/断开与持久化配置；`/tools` 命令查看当前激活工具。
+- **异步后台懒连接与秒级秒开**：TUI 启动时仅在内存实例化配置，网络握手全量移入后台异步 Worker 处理，启动耗时由数秒降至毫秒级（<0.3秒）。
 - 可选依赖：`uv pip install agent2[mcp]`（`mcp>=1.0`）。
 
 ### 8.4 多级工具审批作用域 (`agent2.app.approval`)
@@ -241,6 +242,7 @@
 | `03_planning.py` | Plan-and-Execute 模式 |
 | `04_memory.py` | 记忆系统演示（无需 API Key） |
 | `05_multi_agent.py` | 多 Agent 协作 |
+| `06_advanced_multi_agent.py` | 高级多 Agent 模式（上下文继承/隔离、Skill 选择性激活、Plan 编排与 Prompt 动态切换） |
 
 ## 10. 技术栈
 
