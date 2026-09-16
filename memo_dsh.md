@@ -516,3 +516,14 @@
   - `disconnect_server` 改为 `shutdown.set()` + `asyncio.wait_for(shield(task), timeout=5)` 等待 task 自然退出，不再直接调用 `__aexit__`。
   - `MCPManager.__init__` 新增 `_server_tasks` 与 `_server_shutdowns` 字段；`close()` 同步清理这两个字典。
   - 三个 `_connect_*` 方法统一收敛为 `_start_server_task()` 一行调用，代码量大幅减少。
+
+## 42. 高级多 Agent 综合示例（上下文继承/隔离、Skill 选择性激活、Plan 模式与 Prompt 设定）
+
+- **多 Agent 综合模式示例**（`examples/06_advanced_multi_agent.py`）：
+  - **上下文不继承（隔离模式）**：各 sub-agent 初始化为完全独立的新实例，互不共享历史与状态，适用于职责严格隔离的子任务。
+  - **上下文完整继承**：利用 `orchestrator.fork(name=...)` 深度克隆消息历史与工具上下文，再通过 `set_rule()` 重新赋予特定角色定义。
+  - **上下文选择性继承**：实现 `extract_selective_context()`，保留最近 N 轮完整对话原文，早期对话提炼为紧凑摘要作为背景信息注入 sub-agent。
+  - **Skill 选择性激活**：实现 `build_prompt_with_skills()`，基于 `discover_skills()` 按需过滤并动态注入指定 Skill 的指令块，支持全激活与完全隔离（最小化模式）。
+  - **Plan 模式 Orchestrator**：以 `PlannerAgent` 作为顶层规划编排者，将专业子 Agent（如天气专家、股票专家）封装为 `@tool` 工具，实现由规划模型拆解多步骤后自动分发执行并汇总生成综合报告。
+  - **System Prompt 设定与动态切换**：提供构造时定义、运行时 `set_rule()` 动态角色切换（如诗人/程序员/翻译模式转换且保留历史），以及基于模板（`PROMPT_TEMPLATE`）参数化组装的多场景范例。
+
