@@ -21,10 +21,26 @@
 
 ## 快速开始
 
-```bash
-# 安装
-uv pip install -e "."
+### 安装
 
+Agent2 采用双包发布架构（类 Ansible/LangChain/Jupyter 模式），按需安装：
+
+```bash
+# 1. 完整开箱即用（包含沉浸式终端 TUI 界面，推荐绝大多数用户安装）
+pip install agent2
+# 或使用 uv
+uv add agent2
+
+# 2. 轻量无 UI 核心 SDK / CLI（适用于云端容器、自动化脚本集成，无 Textual 依赖）
+pip install agent2-core
+# 或使用 uv
+uv add agent2-core
+
+# 本地开发模式
+uv pip install -e ".[dev,tui]"
+```
+
+```bash
 # 设置 API Key
 export AGENT2_API_KEY=sk-...
 ```

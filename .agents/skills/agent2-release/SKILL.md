@@ -32,7 +32,7 @@ description: >-
 1. 读取 `pyproject.toml` 中当前的 `version` 字段
 2. 默认策略：**末位数字 +1**（例如 `0.1.3.9` → `0.1.3.10`）
 3. 如果用户指定了版本号，使用用户指定的版本号
-4. 用 `replace_file_content` 更新 `pyproject.toml` 中的 version
+4. 用 `replace_file_content` 更新根目录 `pyproject.toml`（`agent2-core`）以及 `packages/agent2/pyproject.toml`（`agent2`）中的 version（以及 `agent2` 对 `agent2-core>=<NEW_VERSION>` 的依赖版本）
 
 ### Step 2: 查看本次变更
 
@@ -85,11 +85,11 @@ git push origin main
 ### Step 6: 构建并发布
 
 ```bash
-uv build
+uv build --all-packages
 uv publish
 ```
 
-> 注意：`uv publish` 需要 PyPI token 已配置。如果发布失败，报告错误信息给用户。
+> 注意：`uv build --all-packages` 会同时打包核心包 `agent2-core` 与主包 `agent2`。`uv publish` 会自动发布 `dist/` 下的所有包发行物，需要 PyPI token 已配置。如果发布失败，报告错误信息给用户。
 
 ---
 

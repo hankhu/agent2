@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.3.23 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.24 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -244,9 +244,16 @@
 | `05_multi_agent.py` | 多 Agent 协作 |
 | `06_advanced_multi_agent.py` | 高级多 Agent 模式（上下文继承/隔离、Skill 选择性激活、Plan 编排与 Prompt 动态切换） |
 
-## 10. 技术栈
+## 10. 双包发布与技术栈
 
-- **Python ≥ 3.13**，uv 管理项目和依赖
+### 10.1 多包分发体系 (`uv workspace`)
+- **`agent2`**：全功能主包，包含沉浸式终端交互界面 (`agent2` / `agent2-tui`)，依赖 `agent2-core` 与 `textual`。
+- **`agent2-core`**：纯净 Agent 核心 SDK 与 CLI 对话入口 (`agent2-chat`)，无 UI / Textual 依赖。
+- **可选依赖**：`agent2-core[tui]` 安装主包；`agent2-core[memory]` 记忆向量增强；`agent2-core[mcp]` 扩展协议。
+
+### 10.2 技术栈
+- **Python ≥ 3.13**，uv 管理项目和多包工作区
 - 核心依赖：`pydantic` / `pydantic-settings` / `httpx` / `rich` / `openai`
-- 可选依赖：`numpy`（memory）、`mcp`（MCP 工具集成）、`textual`（TUI）、`pytest` / `pytest-asyncio` / `mypy`（dev）
-- 构建系统：Hatchling
+- TUI 依赖：`textual`
+- 可选依赖：`numpy`（memory）、`mcp`（MCP 工具集成）、`pytest` / `pytest-asyncio` / `mypy`（dev）
+- 构建系统：Hatchling + uv workspace

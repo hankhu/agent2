@@ -181,9 +181,7 @@ def test_main_single_turn_and_resume(tmp_path: Path, monkeypatch: pytest.MonkeyP
     # Run single-turn command
     main(["-p", "What is 2+2?"])
     captured = capsys.readouterr().out
-    assert "Session ID:" not in captured
-    assert "Resume with: agent2 --resume" in captured
-    assert "Log file:" in captured
+    assert captured == "Dummy response\n"
 
     latest = sm.get_latest_session()
     assert latest is not None
@@ -195,9 +193,7 @@ def test_main_single_turn_and_resume(tmp_path: Path, monkeypatch: pytest.MonkeyP
     # Resume the session with --continue and another -p
     main(["--continue", "-p", "What is 3+3?"])
     captured2 = capsys.readouterr().out
-    assert "Session ID:" not in captured2
-    assert f"Resume with: agent2 --resume {session_id}" in captured2
-    assert f"Log file:    {log_path}" in captured2
+    assert captured2 == "Dummy response\n"
     assert log_path.exists()
 
     # Check conversation history in saved session
@@ -227,9 +223,7 @@ def test_main_resume_by_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ca
 
     main(["--resume", "Code Review", "-p", "Check performance"])
     captured = capsys.readouterr().out
-    assert "Session ID:" not in captured
-    assert "Resume with: agent2 --resume review123" in captured
-    assert "Log file:" in captured
+    assert captured == "Dummy response\n"
     assert (tmp_path / "logs" / "review123.log").exists()
 
     data = sm.load("review123")
@@ -486,3 +480,15 @@ async def test_plan_mode_session_save_and_restore(tmp_path: Path) -> None:
         assert u_msgs[0]._text == "Build project plan"
         assert len(a_msgs) == 1
         assert "Step by step plan" in a_msgs[0]._content
+
+
+def test_chat_app_single_turn_undecorated(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from agent2.app.chat import main as chat_main
+
+    dummy_llm = DummyLLM()
+    monkeypatch.setattr("agent2.app.chat._build_agent", lambda args: (ReActAgent(name="assistant", llm=dummy_llm), None))
+
+    chat_main(["-p", "Tell me a joke"])
+    captured = capsys.readouterr().out
+    assert captured == "Dummy response\n"
+

@@ -1,7 +1,7 @@
 [project]
-name = "agent2"
-version = "0.1.3.23"
-description = "A modular agent framework for learning and research"
+name = "agent2-core"
+version = "0.1.3.24"
+description = "Core framework and SDK for agent2 (headless, no TUI dependencies)"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -10,19 +10,23 @@ dependencies = [
     "httpx>=0.27",
     "rich>=13.0",
     "openai>=1.30",
-    "textual>=1.0",
 ]
 
 [project.scripts]
-agent2 = "agent2.app.tui:main"
-agent2-tui = "agent2.app.tui:main"
+agent2 = "agent2.app.cli:main"
 agent2-chat = "agent2.app.chat:main"
 
 [project.optional-dependencies]
 memory = ["numpy>=1.26"]
 mcp = ["mcp>=1.0"]
+tui = ["agent2"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "mypy>=1.10"]
 
+[tool.uv.workspace]
+members = ["packages/agent2"]
+
+[tool.uv.sources]
+agent2 = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -34,6 +38,14 @@ default = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent2"]
+exclude = [
+    "/src/agent2/app/tui",
+]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/src/agent2/app/tui",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -42,3 +54,4 @@ testpaths = ["tests"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
+

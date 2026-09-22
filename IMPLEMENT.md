@@ -652,6 +652,31 @@ text = re.sub(r"#(?:file|dir)\s+\S+", " ", text)
 - **后台 Worker 异步握手**：在 `ChatScreen.on_mount()` 中通过 Textual 的 `run_worker(self._init_mcp_servers(), exclusive=False)` 挂载异步任务，在后台完成远程 HTTP/SSE 握手与工具动态注册，确保 TUI 界面可在 0.3 秒内秒开渲染，免受外部网络波动与超时阻塞影响。
 - **单轮运行模式隔离**：在 CLI `-p` 单轮调用中，通过专属异步协程按需初始化并在 finally 块中确保连接回收。
 
+---
+
+## 11. 双包管理与打包实现要点
+
+### 11.1 原地构建与代码零搬迁
+- **保持现有代码路径**：`src/agent2/app/tui` 保持在原路径不动，通过在 `packages/agent2` 中配置符号链接 `packages/agent2/src/agent2/app/tui -> ../../../../../src/agent2/app/tui`，既满足 Hatchling 对构建目录在包根目录下的要求，又彻底避免了移动代码带来的 git blame 丢失、文件冲突与跨分支同步问题。
+- **Hatchling Sdist 解引用**：Hatchling 在构建 sdist (`.tar.gz`) 时会自动解引用符号链接，直接将真实源码文件拷贝打入压缩包；PyPI 最终分发的 wheel 与 sdist 完全独立自包含，无任何符号链接残留。
+
+### 11.2 构建排除规则
+- 核心包 `agent2-core` 在根目录 `pyproject.toml` 的 `[tool.hatch.build.targets.wheel]` 和 `[tool.hatch.build.targets.sdist]` 中配置 `exclude = ["/src/agent2/app/tui"]`，确保打出的 `agent2-core` wheel 仅包含 SDK 与 CLI 代码，彻底剥离 TUI 相关模块与 Textual 依赖。
+- 主分发包 `agent2` 的 `packages/agent2/pyproject.toml` 配置 `[tool.hatch.build.targets.wheel.sources]` 与 `only-include = ["src/agent2/app/tui"]`，产物仅含 `agent2/app/tui`，依赖声明为 `agent2-core>=...` 与 `textual>=...`。
+
+### 11.3 命令行自适应分发
+- `agent2.app.cli` 实现了两级探测机制：
+  ```python
+  def main(argv=None):
+      try:
+          from agent2.app.tui import main as tui_main
+          tui_main(argv)
+      except ImportError:
+          from agent2.app.chat import main as chat_main
+          chat_main(argv)
+  ```
+  保证无论用户直接安装全功能主包 `agent2`，还是在云端轻量环境仅安装 `agent2-core`，`agent2` 命令均能自动呈现最合适的操作界面。
+
 
 
 

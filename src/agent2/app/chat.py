@@ -659,8 +659,13 @@ def _read_user_input() -> str | None:
 
 async def _run_single(agent: ReActAgent, prompt: str) -> None:
     """Single-turn mode: answer the prompt and exit."""
+    if hasattr(agent, "verbose"):
+        agent.verbose = False
+    if hasattr(agent, "log") and hasattr(agent.log, "verbose"):
+        agent.log.verbose = False
     try:
-        await agent.chat(prompt)
+        response = await agent.chat(prompt)
+        print(response)
     finally:
         mcp_mgr = getattr(agent, "mcp_manager", None)
         if mcp_mgr:
@@ -748,7 +753,7 @@ async def _run_interactive(
                     if hasattr(agent, "set_yolo"):
                         agent.set_yolo(True)
                     else:
-                        from agent2.app.tui.app import YOLO_INSTRUCTION
+                        from agent2.app.common import YOLO_INSTRUCTION
                         agent.yolo = True  # type: ignore[attr-defined]
                         if YOLO_INSTRUCTION not in (agent.system_prompt or ""):
                             agent.set_rule((agent.system_prompt or "") + YOLO_INSTRUCTION)
@@ -757,7 +762,7 @@ async def _run_interactive(
                     if hasattr(agent, "set_yolo"):
                         agent.set_yolo(False)
                     else:
-                        from agent2.app.tui.app import YOLO_INSTRUCTION
+                        from agent2.app.common import YOLO_INSTRUCTION
                         agent.yolo = False  # type: ignore[attr-defined]
                         if agent.system_prompt and YOLO_INSTRUCTION in agent.system_prompt:
                             agent.set_rule(agent.system_prompt.replace(YOLO_INSTRUCTION, ""))
@@ -866,7 +871,7 @@ async def _run_interactive(
                         f"---\n\n"
                         f"{arg or 'Please proceed with your expertise.'}"
                     )
-                    from agent2.app.tui.screens.chat import _process_context
+                    from agent2.app.common import _process_context
                     await agent.chat(_process_context(skill_prompt))
                 else:
                     console.print(
@@ -874,7 +879,7 @@ async def _run_interactive(
                     )
                 continue
 
-        from agent2.app.tui.screens.chat import _process_context
+        from agent2.app.common import _process_context
         processed_input = _process_context(user_input)
         await agent.chat(processed_input)
 

@@ -94,6 +94,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 async def _run_single(agent: TUIReActAgent, prompt: str) -> None:
     """Single-turn mode: answer the prompt and exit."""
+    if hasattr(agent, "verbose"):
+        agent.verbose = False
+    if hasattr(agent, "log") and hasattr(agent.log, "verbose"):
+        agent.log.verbose = False
     mcp_mgr = getattr(agent, "mcp_manager", None)
     if mcp_mgr:
         try:
@@ -108,7 +112,8 @@ async def _run_single(agent: TUIReActAgent, prompt: str) -> None:
             import logging
             logging.getLogger(__name__).warning("MCP single-turn init error: %s", exc)
     try:
-        await agent.chat(prompt)
+        response = await agent.chat(prompt)
+        print(response)
     finally:
         if mcp_mgr:
             try:
@@ -194,7 +199,6 @@ def main(argv: list[str] | None = None) -> None:
         except Exception as exc:
             session_manager.log_event(session_id, "ERROR", str(exc))
             session_manager.save(session_id, agent.to_dict(), title=session_title or "")
-            _print_exit_info(session_id, log_path)
             raise
 
         if any(m.role == Role.USER for m in agent.messages):
@@ -203,7 +207,6 @@ def main(argv: list[str] | None = None) -> None:
                     session_id, "ASSISTANT", agent.messages[-1].content or ""
                 )
             session_manager.save(session_id, agent.to_dict(), title=session_title or "")
-            _print_exit_info(session_id, log_path)
         return
 
     app = Agent2App(

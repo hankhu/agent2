@@ -36,13 +36,7 @@ from agent2.app.tui.styles import APP_CSS
 # ── TUI-specific ReAct agent with HITL ──────────────────────────
 
 
-YOLO_INSTRUCTION = (
-    "\n\n[YOLO / Autopilot Mode Active]\n"
-    "All operations and tool executions are automatically approved. "
-    "You must make decisions, choose options, and solve problems autonomously "
-    "without asking the user for confirmation or choices. "
-    "Make your best judgment and proceed proactively to complete the goal."
-)
+from agent2.app.common import YOLO_INSTRUCTION
 
 
 class TUIReActAgent(ReActAgent):

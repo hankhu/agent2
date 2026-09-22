@@ -1,6 +1,22 @@
 # Changelog
 
-## [0.1.3.23] - 2026-09-17
+## [0.1.3.24] - 2026-09-22
+
+### Added
+- **多包发布体系与 `agent2-core` + `agent2` 开箱即用模式**：
+  - 采用 Ansible/LangChain/Jupyter 标准模式，基于 `uv workspace` 拆分为 `agent2` 主分发包与 `agent2-core` 核心包。
+  - `agent2`：全功能主包，`pip install agent2` 默认安装完整交互环境（依赖 `agent2-core` + `textual`），提供 `agent2` 与 `agent2-tui` 启动沉浸式终端 TUI。
+  - `agent2-core`：纯净无 UI 核心框架包，彻底去除 `textual` 依赖，提供 Agent SDK 运行时与 `agent2-chat` 基础 CLI。
+- **共享上下文扩展与 YOLO 规范 (`agent2.app.common`)**：
+  - 抽离 `YOLO_INSTRUCTION` 与 `process_context`（`#file`、`#dir`、`@ref` 上下文注入解析），彻底消除 `chat.py` 对 `tui` 的反向依赖。
+- **命令行自适应分发器 (`agent2.app.cli`)**：
+  - 执行 `agent2` 命令时动态探测环境：已安装 TUI 模块时自动拉起 TUI 界面，未安装时优雅回退至 CLI 对话模式。
+- **双包构建与自动化回归测试 (`tests/test_package_split.py`)**：
+  - 验证上下文展开、YOLO 指令完整性、CLI 动态分发回退以及 `agent2` / `agent2-core` 版本号双向探测。
+
+### Changed
+- **依赖结构解耦**：从核心包 `agent2-core` 中彻底移除 `textual`。
+- **构建与发版流程**：根配置添加 `exclude = ["/src/agent2/app/tui"]`，发版流程通过 `uv build --all-packages` 同时打包 `agent2-core` 与 `agent2` 并统一发布。
 
 ### Added
 - **高级多 Agent 协作与编排综合示例 (`examples/06_advanced_multi_agent.py`)**：

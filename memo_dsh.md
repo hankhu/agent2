@@ -537,4 +537,23 @@
 - **启动性能分析辅助**（`profile_startup.py`）：
   - 针对 TUI 启动耗时排查，提供分阶段（Import / Config / LLM / Context / MCP）基准测试脚本，精确定位启动开销分布。
 
+## 43. 双包发布改造（拆分 agent2-core 与 agent2 并原地打包） (v0.1.3.24)
+
+- **多包架构设计（Batteries-Included 模式）**：
+  - 采用类 Ansible/LangChain/Jupyter 标准模式，基于 `uv workspace` 拆分为 `agent2` 主分发包与 `agent2-core` 核心包。
+  - `agent2` 主包：依赖 `agent2-core` + `textual`，普通用户 `pip install agent2` 默认获得包含沉浸式终端 TUI 的完整体验，提供 `agent2` 与 `agent2-tui` 命令。
+  - `agent2-core` 核心包：剥离 `textual` 依赖与 TUI 代码，提供纯净 Agent SDK 运行时与 `agent2-chat` 基础 CLI。
+- **共享逻辑解耦**（`src/agent2/app/common.py`）：
+  - 将原在 `tui` 中定义的 `YOLO_INSTRUCTION` 与 `process_context`（`#file`、`#dir`、`@ref` 上下文展开）提取至 `agent2.app.common`。
+  - 彻底解除 `chat.py` 对 `agent2.app.tui` 的反向依赖。
+- **自适应命令行分发**（`src/agent2/app/cli.py`）：
+  - 动态探测环境：若安装了 TUI 模块，`agent2` 自动拉起 TUI 界面；若未安装，则优雅回退至 CLI 对话。
+- **原地构建与零搬迁机制**：
+  - `src/agent2/app/tui` 保持现有源码路径不动，无任何 git blame 丢失或移动开销。
+  - `packages/agent2` 内通过相对符号链接引用 `src/agent2/app/tui`，并在 `pyproject.toml` 中通过 `only-include` 与 `sources` 隔离 wheel 产物。
+  - Hatchling 构建 sdist 时自动解引用为实体文件，生成的发行物独立自包含。
+  - 根 `pyproject.toml` 通过 `exclude = ["/src/agent2/app/tui"]` 确保 `agent2-core` wheel / sdist 完全排除 TUI 代码。
+- **发布技能更新**（`.agents/skills/agent2-release/SKILL.md`）：
+  - 发版步骤更新为 `uv build --all-packages`，一次性生成双包的 wheel 与 sdist 并统一发布。
+
 

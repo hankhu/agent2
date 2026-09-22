@@ -401,3 +401,32 @@ synthesize_plan_results() ──▶ LLM 综合生成统一最终答复
 - 每个 Agent / Crew 持有独立的 `AgentLogger` 实例，互不干扰。
 - 文件日志写入使用 `threading.Lock` 保证多协程/多线程下的并发安全。
 - `utils.json_helpers.extract_json()` 提供从 LLM 输出中鲁棒提取 JSON 的共享工具函数，供 `planner.py`、`reflection.py` 等模块复用。
+
+---
+
+## 7. 分包与双包发布架构设计
+
+### 7.1 解耦目标
+- **主分发包 `agent2`（Batteries-Included 模式）**：面向最终用户，`pip install agent2` 开箱即得全功能沉浸式终端界面（TUI），心智模型与 Ansible/LangChain/Jupyter 完全一致。
+- **核心包 `agent2-core`（Headless SDK 模式）**：面向云端容器、微服务、CI 与无 UI 自动化脚本，保持极致轻量，彻底剥离 `textual` 依赖与 TUI 模块。
+
+### 7.2 模块组织与依赖流向
+```text
+┌───────────────────────────┐
+│          agent2           │  (全功能主包：依赖 agent2-core + textual，提供 agent2 / agent2-tui 命令)
+│    agent2.app.tui.*       │
+└─────────────┬─────────────┘
+              │ 依赖 (单向)
+              ▼
+┌───────────────────────────┐
+│        agent2-core        │  (纯净内核：无 Textual 依赖，提供 agent2-chat 命令与 Agent SDK)
+│   agent2.app.common       │  (YOLO_INSTRUCTION, process_context)
+│   agent2.app.cli (分发器) │  (探测并优先调用 tui，回退至 chat)
+│   agent2.app.chat         │  (CLI 终端对话)
+│   agent2.agent / tools /  │
+│   llm / memory / context  │
+└───────────────────────────┘
+```
+
+- **消除反向依赖**：原 `chat.py` 中对 `tui.app` 与 `tui.screens.chat` 的引用彻底转移至 `agent2.app.common`。
+- **命名空间兼容**：`src/agent2/__init__.py` 与 `src/agent2/app/__init__.py` 配置 `pkgutil.extend_path`，安装 `agent2` 时子包无缝合入 `agent2.app` 命名空间。
