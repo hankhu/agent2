@@ -12,7 +12,7 @@ try:
     except PackageNotFoundError:
         __version__ = version("agent2-core")
 except PackageNotFoundError:
-    __version__ = "0.1.3.24"
+    __version__ = "0.1.3.25"
 
 __all__ = [
     "__version__",

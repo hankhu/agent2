@@ -537,7 +537,7 @@
 - **启动性能分析辅助**（`profile_startup.py`）：
   - 针对 TUI 启动耗时排查，提供分阶段（Import / Config / LLM / Context / MCP）基准测试脚本，精确定位启动开销分布。
 
-## 43. 双包发布改造（拆分 agent2-core 与 agent2 并原地打包） (v0.1.3.24)
+## 43. 双包发布改造（拆分 agent2-core 与 agent2 并原地打包） (v0.1.3.25)
 
 - **多包架构设计（Batteries-Included 模式）**：
   - 采用类 Ansible/LangChain/Jupyter 标准模式，基于 `uv workspace` 拆分为 `agent2` 主分发包与 `agent2-core` 核心包。

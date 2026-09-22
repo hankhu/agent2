@@ -56,11 +56,11 @@ def test_version_detection(monkeypatch: pytest.MonkeyPatch) -> None:
         if pkg == "agent2":
             raise importlib.metadata.PackageNotFoundError
         if pkg == "agent2-core":
-            return "0.1.3.24"
+            return "0.1.3.25"
         raise importlib.metadata.PackageNotFoundError
 
     monkeypatch.setattr(importlib.metadata, "version", fake_version)
     import importlib
     import agent2
     importlib.reload(agent2)
-    assert agent2.__version__ == "0.1.3.24"
+    assert agent2.__version__ == "0.1.3.25"
