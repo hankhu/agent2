@@ -325,9 +325,18 @@ class OpenAILLM(BaseLLM):
                     ToolCall(id=tc.id, name=tc.function.name, arguments=args)
                 )
 
+        thought = getattr(oai_msg, "reasoning_content", None) or None
+        content = oai_msg.content
+        if not content and not tool_calls and choice.finish_reason == "length":
+            content = (
+                "⚠️ 模型在思考过程中耗尽了输出 Token 配额（达到 max_tokens 限制），未生成最终回复。\n"
+                "建议在配置文件 `~/.config/agent2/config.json` 中为该模型调大 `max_tokens`。"
+            )
+
         message = Message.assistant(
-            content=oai_msg.content,
+            content=content,
             tool_calls=tool_calls,
+            thought=thought,
         )
 
         usage = Usage()

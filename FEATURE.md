@@ -1,6 +1,6 @@
 # Agent2 功能清单
 
-> 版本 0.1.3.25 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
+> 版本 0.1.3.26 — 模块化 AI Agent 系统框架，用于学习和研究 Agent 核心架构与设计模式。
 
 ---
 
@@ -8,7 +8,8 @@
 
 - **统一接口** — `BaseLLM` 抽象类定义 `chat()` / `chat_stream()` 两个核心方法，所有提供商共用同一套消息模型。
 - **OpenAI 兼容适配器** — `OpenAILLM` 封装 `openai.AsyncOpenAI`，支持任何 OpenAI-compatible API（OpenAI / DeepSeek / Ollama / vLLM / Qwen 等），自动处理 `/v1` 路径补全。
-- **全方位模型参数配置** — 支持 `context_window`（支持 `deepseek-v4` 1M 等主流模型自动推导与配置）、`temperature`、`top_k`、`top_p` 与 `reasoning_effort`（low / medium / high）。
+- **全方位模型参数配置** — 支持 `context_window`（支持 `deepseek-v4` 1M 等主流模型自动推导与配置）、`temperature`、`top_k`、`top_p` 与 `reasoning_effort`（low / medium / high），且支持 Provider 级默认参数自动继承。
+- **推理模型思维链与防截断兜底** — 支持提取 DeepSeek-R1 等模型的 `reasoning_content`（`thought` 字段）；当单次生成达到 `max_tokens`（`finish_reason="length"`）且正文未生成时，给出友好的超限解释与配置指引。
 - **计价与成本估算** — `ModelPricing` 内建官方模型费率（USD/1M tokens），自动累计会话请求费用，并在状态栏与模型选择器中清晰呈现。
 - **协议自愈与修复** — `_repair_tool_messages()` 自动校验并补齐缺失的 `tool` 响应消息，确保符合 OpenAI 协议规范。
 - **流式输出** — `chat_stream()` 支持 SSE 逐 token 流式返回。
@@ -209,7 +210,8 @@
 ### 8.2 Skills (`agent2.context` + `agent2.app.tui.screens.skill_select`)
 
 - 遵循 Agent Skills 规范，从 `SKILL.md` YAML frontmatter 解析 `name` / `description`，支持折叠多行描述与无 frontmatter 回退。
-- 多目录优先级：全局 `~/.config/agent2/skills`、`~/.claude/skills`、`~/.agent2/skills`；项目 `.claude/skills`、`.agents/skills`、`.agent2/skills`，同名技能后扫描目录覆盖。
+- 多目录优先级：内置包级 `builtin/tui`；全局 `~/.config/agent2/skills`、`~/.claude/skills`、`~/.agent2/skills`；项目 `.claude/skills`、`.agents/skills`、`.agent2/skills`，同名技能后扫描目录覆盖。
+- **内置 `/setup` Skill**：包自带配置诊断与引导技能，配合 `/setup` 斜杠命令一键排查 Provider、模型、Key、URL 与 MCP 状态。
 - 支持 `/skills` 浏览/重载、动态 `/<skill_name> [prompt]` 调用、斜杠命令补全；TUI 提供 `SkillSelectScreen` 全屏选择器（`F3`）。
 
 ### 8.3 MCP (Model Context Protocol) (`agent2.mcp`)

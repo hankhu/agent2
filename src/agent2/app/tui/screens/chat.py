@@ -65,6 +65,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/mcp", "Manage MCP servers: list, enable, disable (/mcp [list|enable|disable])"),
     ("/cfg", "Open configuration (~/.config/agent2/config.json) in system editor"),
     ("/config", "Alias for /cfg"),
+    ("/setup", "Diagnose & setup agent2-tui configuration (model, provider, MCP)"),
     ("/clear", "Clear display"),
     ("/compact", "Compact conversation context to free window capacity (/compact [keep_turns])"),
     ("/retry", "Retry last user query / regenerate response"),
@@ -1399,6 +1400,7 @@ class ChatScreen(Screen):
                 "  /rename <title> Rename current session\n"
                 "  /export [path]  Export conversation history\n"
                 "  /cfg            Open configuration in system editor\n"
+                "  /setup [query]  Diagnose & setup configuration (models, providers, MCP)\n"
                 "  /yolo [on|off|show]      YOLO / Autopilot mode: auto-approve operations & autonomous decisions\n"
                 "  /allow-all [on|off|show] Allow-all mode: auto-approve all operations\n"
                 "  /help           This help\n"
@@ -1467,6 +1469,9 @@ class ChatScreen(Screen):
 
         elif cmd in ("/cfg", "/config"):
             self._handle_cfg()
+
+        elif cmd == "/setup":
+            await self._handle_setup(arg)
 
         else:
             # ── Dynamic skill invocation: /<skill_name> [prompt] ──
@@ -1712,6 +1717,47 @@ class ChatScreen(Screen):
             messages.add_system_message(f"✅ {status_msg}")
         else:
             messages.add_system_message(f"⚠️ {status_msg}")
+
+    async def _handle_setup(self, arg: str | None) -> None:
+        """Activate the setup & configuration skill."""
+        from agent2.context import discover_skills
+
+        app: Agent2App = self.app  # type: ignore[assignment]
+        ctx = getattr(app, "context", None)
+        skill = ctx.get_skill("setup") if ctx else None
+        if not skill:
+            for s in discover_skills():
+                if s.name.lower() in ("setup", "agent2-tui-config"):
+                    skill = s
+                    if ctx:
+                        ctx.skills = discover_skills()
+                    break
+
+        if skill:
+            if not arg:
+                prompt_text = (
+                    "请检查当前 agent2-tui 的配置状态（包括 ~/.config/agent2/ 目录、config.json 格式、"
+                    "已配置的 Provider 与模型、API Key/Base URL 以及 MCP 状态），向我汇报当前配置状况，"
+                    "并引导我完成配置或诊断现有问题。"
+                )
+            else:
+                prompt_text = arg
+
+            skill_prompt = (
+                f"[Skill: {skill.name}]\n"
+                f"Description: {skill.description}\n\n"
+                f"{skill.content}\n\n"
+                f"---\n\n"
+                f"{prompt_text}"
+            )
+            display_msg = f"/setup {arg}" if arg else "/setup"
+            await self._mount_and_render_user_message(display_msg)
+            self._run_agent(skill_prompt)
+        else:
+            messages = self.query_one("#messages", MessageList)
+            messages.add_system_message(
+                "❌ Setup skill not found. Please ensure agent2-tui is properly installed."
+            )
 
     def _rebuild_messages(self) -> None:
         """Re-populate the message list from the agent's history."""

@@ -54,6 +54,14 @@ class ProviderConfig(BaseModel):
         default=None,
         description="API key for the provider",
     )
+    max_tokens: int | None = Field(
+        default=None,
+        description="Default max tokens for models using this provider",
+    )
+    context_window: int | None = Field(
+        default=None,
+        description="Default context window for models using this provider",
+    )
 
 
 class LLMConfig(BaseModel):
@@ -224,12 +232,16 @@ class AppConfig(BaseModel):
             if isinstance(entry, dict):
                 res = dict(entry)
                 provider_name = res.pop("provider", None)
-                if provider_name and provider_name in self.providers:
-                    p = self.providers[provider_name]
-                    if p.base_url and "base_url" not in res:
-                        res["base_url"] = p.base_url
-                    if p.api_key and "api_key" not in res:
-                        res["api_key"] = p.api_key
+                p_obj = self.providers.get(provider_name) if provider_name else None
+                if p_obj:
+                    if p_obj.base_url and "base_url" not in res:
+                        res["base_url"] = p_obj.base_url
+                    if p_obj.api_key and "api_key" not in res:
+                        res["api_key"] = p_obj.api_key
+                    if p_obj.max_tokens is not None and "max_tokens" not in res:
+                        res["max_tokens"] = p_obj.max_tokens
+                    if p_obj.context_window is not None and "context_window" not in res:
+                        res["context_window"] = p_obj.context_window
                 model_id = res.pop("model_id", None) or res.pop("model", None) or key
                 res["model"] = model_id
                 if provider_name:
@@ -258,8 +270,8 @@ class AppConfig(BaseModel):
                         "base_url": p.base_url,
                         "api_key": p.api_key,
                         "temperature": self.temperature,
-                        "max_tokens": self.max_tokens,
-                        "context_window": self.context_window,
+                        "max_tokens": p.max_tokens if p.max_tokens is not None else self.max_tokens,
+                        "context_window": p.context_window if p.context_window is not None else self.context_window,
                         "top_k": self.top_k,
                         "top_p": self.top_p,
                         "reasoning_effort": self.reasoning_effort,
@@ -286,8 +298,8 @@ class AppConfig(BaseModel):
                     "base_url": prov_entry.base_url,
                     "api_key": prov_entry.api_key,
                     "temperature": self.temperature,
-                    "max_tokens": self.max_tokens,
-                    "context_window": self.context_window,
+                    "max_tokens": prov_entry.max_tokens if prov_entry.max_tokens is not None else self.max_tokens,
+                    "context_window": prov_entry.context_window if prov_entry.context_window is not None else self.context_window,
                     "top_k": self.top_k,
                     "top_p": self.top_p,
                     "reasoning_effort": self.reasoning_effort,

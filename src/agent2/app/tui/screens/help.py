@@ -37,6 +37,7 @@ HELP_MARKDOWN = """
 - **/fork** `[title]`: Fork current session into a new branch
 - **/export** `[path]`: Export conversation history to file
 - **/cfg**: Open configuration (~/.config/agent2/config.json) in system editor
+- **/setup**: Diagnose and configure agent2-tui settings (API keys, models, MCP)
 - **/yolo** `[on|off|show]`: YOLO / Autopilot mode (auto-approve & autonomous decisions)
 - **/allow-all** `[on|off|show]`: Auto-approve all tool operations
 

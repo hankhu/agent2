@@ -556,4 +556,25 @@
 - **发布技能更新**（`.agents/skills/agent2-release/SKILL.md`）：
   - 发版步骤更新为 `uv build --all-packages`，一次性生成双包的 wheel 与 sdist 并统一发布。
 
+## 44. 内置 /setup Skill、Provider 配置继承、推理模型思维链与大文档 Bug 修复 (v0.1.3.26)
+
+- **内置 `/setup` Skill 与交互式配置诊断**（`src/agent2/app/tui/skills/setup/SKILL.md`、`src/agent2/app/tui/screens/chat.py`、`src/agent2/context.py`）：
+  - 新增内置 `setup` skill，支持检测 `~/.config/agent2/config.json` 配置、Provider、模型、API Key、Base URL 以及 MCP 状态，提供引导与自动排错方案。
+  - 在 TUI 中接入 `/setup [query]` 斜杠命令与帮助提示，支持一键发起配置巡检或针对性诊断。
+  - 增强 `discover_skills()` 支持发现包内置 Skills (`builtin/tui`)，并在目录扫描时增加对权限受限路径（`PermissionError`）的容错机制。
+
+- **Provider 级 `max_tokens` 与 `context_window` 继承机制**（`src/agent2/app/config.py`）：
+  - `ProviderConfig` 新增 `max_tokens` 与 `context_window` 字段。
+  - `AppConfig.resolve_model` 允许模型自动从关联 Provider 中继承默认的 `max_tokens` 与 `context_window`，避免在多模型配置中重复声明。
+
+- **推理模型思维链（`reasoning_content`）捕获与 TUI 展示**（`src/agent2/llm/message.py`、`src/agent2/llm/openai.py`、`src/agent2/agent/react.py`、`src/agent2/app/tui/app.py`）：
+  - `Message` 与 `LLMResponse` 增加 `thought` 字段支持。
+  - `OpenAILLM._from_oai_response` 适配 DeepSeek / SiliconFlow 等推理模型的 `reasoning_content`。
+  - `ReActAgent` 与 `TUIReActAgent` 将 `thought` 正常推入日志体系，供 TUI 渲染可折叠的 `ThinkingBlock`。
+  - 修复推理模型在大文档（如 `@` 引用 18KB 文件）分析场景下耗尽 `max_tokens`（`finish_reason="length"`）且正文未生成时，界面静默空白的 Bug，增加友好超限提示与调优建议。
+
+- **架构文档沉淀**（`ARCHITECTURE.md`）：
+  - 全面梳理并沉淀 8 大子系统架构设计文档，涵盖职责边界、核心抽象及依赖拓扑。
+
+
 

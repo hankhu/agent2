@@ -60,6 +60,7 @@ class Message(BaseModel):
 
     role: Role
     content: str | None = None
+    thought: str | None = None
     tool_calls: list[ToolCall] | None = None
     tool_result: ToolResult | None = None
 
@@ -78,8 +79,9 @@ class Message(BaseModel):
         cls,
         content: str | None = None,
         tool_calls: list[ToolCall] | None = None,
+        thought: str | None = None,
     ) -> Message:
-        return cls(role=Role.ASSISTANT, content=content, tool_calls=tool_calls)
+        return cls(role=Role.ASSISTANT, content=content, tool_calls=tool_calls, thought=thought)
 
     @classmethod
     def tool(cls, tool_call_id: str, content: str, *, is_error: bool = False) -> Message:
@@ -175,6 +177,10 @@ class LLMResponse(BaseModel):
     @property
     def content(self) -> str | None:
         return self.message.content
+
+    @property
+    def thought(self) -> str | None:
+        return self.message.thought
 
     @property
     def tool_calls(self) -> list[ToolCall]:

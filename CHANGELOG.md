@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.3.26] - 2026-11-03
+
+### Added
+- **内置 `/setup` Skill 与交互式配置诊断**：
+  - 新增内置 `setup` skill (`src/agent2/app/tui/skills/setup/SKILL.md`)，用于诊断与引导用户配置 Provider、模型、API Key、Base URL 以及 MCP 状态。
+  - TUI 增加 `/setup [query]` 快捷命令与帮助提示，支持一键执行配置巡检或定向排查。
+  - `agent2.context` 增加内置包级 Skill 发现能力 (`include_builtin`)，并增强了目录扫描遇权限受限（`PermissionError`）时的容错处理。
+- **Provider 级 `max_tokens` 与 `context_window` 继承机制**：
+  - `ProviderConfig` 新增 `max_tokens` 与 `context_window` 字段声明。
+  - `AppConfig.resolve_model` 允许模型自动继承对应 Provider 预设的 `max_tokens` 与 `context_window`，彻底消除模型需重复显式声明的问题。
+- **推理模型思维链（`reasoning_content`）捕获与 TUI 展示**：
+  - `Message` 与 `LLMResponse` 统一增加 `thought` 字段支持。
+  - `OpenAILLM` 适配 DeepSeek / SiliconFlow 等推理模型的 `reasoning_content` 输出，并在 `ReActAgent` 与 `TUIReActAgent` 中触发 `self.log.thought()`，在 TUI 中自动渲染折叠的 `ThinkingBlock`。
+- **系统架构文档 (`ARCHITECTURE.md`)**：
+  - 新增 8 大子系统职责边界、核心抽象及双包架构的系统性技术文档。
+
+### Fixed
+- **大文档引用（`@`）时推理模型 token 超限导致响应空白问题**：
+  - 修复推理模型在分析大文档耗尽 `max_tokens`（`finish_reason="length"`）且正文未生成时，界面静默无响应的问题；现提供友好的超限解释与配置优化建议。
+
 ## [0.1.3.25] - 2026-09-23
 
 ### Added

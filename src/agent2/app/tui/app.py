@@ -133,8 +133,9 @@ class TUIReActAgent(ReActAgent):
             )
 
             if response.has_tool_calls:
-                if response.content:
-                    self.log.thought(response.content)
+                thought = getattr(response, "thought", None) or response.content
+                if thought:
+                    self.log.thought(thought)
                 self._messages.append(response.message)
                 tool_results = await self._execute_tool_calls(response.tool_calls)
                 self._messages.extend(tool_results)
@@ -173,6 +174,8 @@ class TUIReActAgent(ReActAgent):
                     )
                 continue
 
+            if getattr(response, "thought", None):
+                self.log.thought(response.thought)
             final_answer = response.content or ""
             self.log.final_answer(final_answer)
             return final_answer

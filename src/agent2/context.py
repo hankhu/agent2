@@ -205,36 +205,65 @@ def parse_skill_markdown(content: str, default_name: str) -> tuple[str, str, str
 # ── Skills Discovery ────────────────────────────────────────────────
 
 
-def get_skill_search_dirs(work_dir: Path | None = None) -> list[tuple[Path, str]]:
+def get_skill_search_dirs(
+    work_dir: Path | None = None,
+    include_builtin: bool | None = None,
+) -> list[tuple[Path, str]]:
     """Return search directories for skills ordered by priority (lowest first)."""
     home = Path.home()
     work = work_dir or Path.cwd()
-    return [
+    dirs: list[tuple[Path, str]] = []
+
+    # Package built-in skills (lowest priority, enabled by default in default workspace)
+    if include_builtin is None:
+        include_builtin = work_dir is None
+
+    if include_builtin:
+        try:
+            import agent2.app.tui as tui_pkg
+
+            if tui_pkg.__file__:
+                tui_skills = Path(tui_pkg.__file__).parent / "skills"
+                if tui_skills.is_dir():
+                    dirs.append((tui_skills, "builtin/tui"))
+        except (ImportError, AttributeError):
+            pass
+
+    dirs.extend([
         (CONFIG_DIR / "skills", "~/.config/agent2/skills"),
         (home / ".claude" / "skills", "~/.claude/skills"),
         (home / ".agent2" / "skills", "~/.agent2/skills"),
         (work / ".claude" / "skills", ".claude/skills"),
         (work / ".agents" / "skills", ".agents/skills"),
         (work / ".agent2" / "skills", ".agent2/skills"),
-    ]
+    ])
+    return dirs
 
 
-def discover_skills(work_dir: Path | None = None) -> list[SkillInfo]:
+def discover_skills(
+    work_dir: Path | None = None,
+    include_builtin: bool | None = None,
+) -> list[SkillInfo]:
     """Discover all available skills from standard skill directories.
 
     Scans:
+      - built-in package skills (lowest priority)
       - ~/.agent2/skills (primary)
       - ~/.claude/skills
       - .agent2/skills / .agents/skills / .claude/skills (project)
       - ~/.config/agent2/skills (fallback)
     """
-    search_dirs = get_skill_search_dirs(work_dir)
+    search_dirs = get_skill_search_dirs(work_dir, include_builtin=include_builtin)
     skills_map: dict[str, SkillInfo] = {}
 
     for d, source_label in search_dirs:
-        if not d.is_dir():
+        try:
+            if not d.is_dir():
+                continue
+            children = sorted(d.iterdir())
+        except OSError:
             continue
-        for child in sorted(d.iterdir()):
+        for child in children:
             if child.is_dir() and (child / "SKILL.md").is_file():
                 skill_file = child / "SKILL.md"
                 try:

@@ -167,3 +167,59 @@ def test_create_llm_with_explicit_and_config_args(monkeypatch: pytest.MonkeyPatc
     llm2 = create_llm("some-unlisted-model", context_window=50000, top_k=10)
     assert llm2.context_window == 50000
     assert llm2.top_k == 10
+
+
+def test_provider_config_max_tokens_and_context_window() -> None:
+    cfg = AppConfig.model_validate({
+        "providers": {
+            "my_prov": {
+                "base_url": "https://api.example.com",
+                "api_key": "secret",
+                "max_tokens": 16384,
+                "context_window": 32000,
+            }
+        },
+        "models": {
+            "model-inherit": {"provider": "my_prov"},
+            "model-override": {"provider": "my_prov", "max_tokens": 8192},
+        }
+    })
+    res_inherit = cfg.resolve_model("model-inherit")
+    assert res_inherit["max_tokens"] == 16384
+    assert res_inherit["context_window"] == 32000
+
+    res_override = cfg.resolve_model("model-override")
+    assert res_override["max_tokens"] == 8192
+    assert res_override["context_window"] == 32000
+
+
+def test_openai_from_response_extracts_reasoning_content() -> None:
+    mock_choice = MagicMock()
+    mock_choice.finish_reason = "stop"
+    mock_choice.message.content = "Answer text"
+    mock_choice.message.tool_calls = None
+    mock_choice.message.reasoning_content = "Thinking step 1..."
+
+    mock_resp = MagicMock()
+    mock_resp.choices = [mock_choice]
+    mock_resp.usage = None
+
+    llm_resp = OpenAILLM._from_oai_response(mock_resp)
+    assert llm_resp.content == "Answer text"
+    assert llm_resp.thought == "Thinking step 1..."
+
+
+def test_openai_from_response_handles_length_cutoff_without_content() -> None:
+    mock_choice = MagicMock()
+    mock_choice.finish_reason = "length"
+    mock_choice.message.content = ""
+    mock_choice.message.tool_calls = None
+    mock_choice.message.reasoning_content = "Extensive thinking that exhausted tokens..."
+
+    mock_resp = MagicMock()
+    mock_resp.choices = [mock_choice]
+    mock_resp.usage = None
+
+    llm_resp = OpenAILLM._from_oai_response(mock_resp)
+    assert "max_tokens" in llm_resp.content
+    assert llm_resp.thought == "Extensive thinking that exhausted tokens..."

@@ -85,8 +85,9 @@ class ReActAgent(BaseAgent):
             # If the LLM wants to call tools → Action + Observation
             if response.has_tool_calls:
                 # Log the thinking (if any content accompanies tool calls)
-                if response.content:
-                    self.log.thought(response.content)
+                thought = response.thought or response.content
+                if thought:
+                    self.log.thought(thought)
 
                 # Record the assistant message with tool calls
                 self._messages.append(response.message)
@@ -97,6 +98,8 @@ class ReActAgent(BaseAgent):
                 continue
 
             # No tool calls → this is the final answer
+            if response.thought:
+                self.log.thought(response.thought)
             final_answer = response.content or ""
             self.log.final_answer(final_answer)
             return final_answer
