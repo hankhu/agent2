@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3.27] - 2026-11-03
+
+### Changed
+- **状态条信息去重与布局精简**：
+  - 清理 Chat box 之上（`ContextBar`）与之下（`StatusBar`）的重复指标显示。
+  - 明确分工：上方 `ContextBar` 专门承载会话与运行时详细指标（工作目录、慢操作 `↳`、Token 消耗、费用、会话时长 `⏱`、实时吞吐 `TPS`、上下文比例 `ctx`、当前模型 `[provider] model`）；下方 `StatusBar` 专注展示快捷键指南与精炼交互状态（`[AGENT/PLAN/ASK]`、`idle/wait for input/busy`、`[YOLO/ALLOW-ALL]`），彻底消除视觉冗余。
+
 ## [0.1.3.26] - 2026-11-03
 
 ### Added

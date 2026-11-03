@@ -308,15 +308,8 @@ class StatusBar(Static):
             badges.append("[bold yellow]wait for input[/bold yellow]")
         elif self.status_state == "idle":
             badges.append("[dim]idle[/dim]")
-        elif self.busy:
-            label = self.status_text or "busy"
-            badges.append(f"[bold cyan]{label}[/bold cyan]")
-        session_elapsed = max(0.0, time.monotonic() - self._session_start)
-        if self.long_operation:
-            badges.append(f"[dim]↳ {self.long_operation}[/dim]")
-        badges.append(f"[dim]session: {_fmt_duration(session_elapsed)}[/dim]")
-        if self.tps > 0:
-            badges.append(f"[dim]TPS:[/dim] [bold]{_fmt_tps(self.tps)}[/bold] [dim]tok/s[/dim]")
+        elif self.busy or self.status_state == "busy":
+            badges.append("[bold cyan]busy[/bold cyan]")
         if self.yolo:
             badges.append("[bold red]YOLO[/bold red]")
         elif self.allow_all:

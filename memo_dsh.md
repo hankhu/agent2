@@ -576,5 +576,14 @@
 - **架构文档沉淀**（`ARCHITECTURE.md`）：
   - 全面梳理并沉淀 8 大子系统架构设计文档，涵盖职责边界、核心抽象及依赖拓扑。
 
+## 45. 状态条信息去重与布局精简 (v0.1.3.27)
+
+- **状态条信息去重与职责明确**（`src/agent2/app/tui/widgets/status_bar.py`）：
+  - **背景**：Chat box 之上（`ContextBar`）与之下（`StatusBar`）存在严重的视觉重复，`↳ slow_operation`、`session: duration`、`TPS: xx tok/s` 以及操作标签在上下两行同时堆叠显示。
+  - **精简改造**：
+    - 从底栏 `StatusBar` 中彻底移除 `long_operation`、`session_duration`、`tps` 及冗长 `status_text` 的重复输出；
+    - 明确分工：上方 `ContextBar` 专门承载会话与运行时详细性能指标（Token 消耗、费用、会话时长 `⏱`、实时吞吐 `TPS`、上下文窗口比例 `ctx`、模型名称及慢操作提示）；下方 `StatusBar` 专注展示全局快捷键引导与精简状态（`[AGENT/PLAN/ASK]`、`idle/wait for input/busy`、`[YOLO/ALLOW-ALL]`），彻底消除视觉冗余。
+
+
 
 
